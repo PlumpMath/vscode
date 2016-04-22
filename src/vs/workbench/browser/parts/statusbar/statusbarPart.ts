@@ -10,8 +10,8 @@ import dom = require('vs/base/browser/dom');
 import types = require('vs/base/common/types');
 import nls = require('vs/nls');
 import {toErrorMessage} from 'vs/base/common/errors';
-import {Promise} from 'vs/base/common/winjs.base';
-import {disposeAll, IDisposable} from 'vs/base/common/lifecycle';
+import {TPromise} from 'vs/base/common/winjs.base';
+import {dispose, IDisposable} from 'vs/base/common/lifecycle';
 import {Builder, $} from 'vs/base/browser/builder';
 import {OcticonLabel} from 'vs/base/browser/ui/octiconLabel/octiconLabel';
 import {Registry} from 'vs/platform/platform';
@@ -36,18 +36,13 @@ export class StatusbarPart extends Part implements IStatusbarService {
 	private toDispose: IDisposable[];
 	private statusItemsContainer: Builder;
 
-	private instantiationService: IInstantiationService;
-
 	constructor(
-		id: string
+		id: string,
+		@IInstantiationService private instantiationService: IInstantiationService
 	) {
 		super(id);
 
 		this.toDispose = [];
-	}
-
-	public setInstantiationService(service: IInstantiationService): void {
-		this.instantiationService = service;
 	}
 
 	public addEntry(entry: IStatusbarEntry, alignment: StatusbarAlignment, priority: number = 0): IDisposable {
@@ -145,7 +140,7 @@ export class StatusbarPart extends Part implements IStatusbarService {
 	}
 
 	public dispose(): void {
-		this.toDispose = disposeAll(this.toDispose);
+		this.toDispose = dispose(this.toDispose);
 
 		super.dispose();
 	}
@@ -166,7 +161,7 @@ class StatusBarEntryItem implements IStatusbarItem {
 	}
 
 	public render(el: HTMLElement): IDisposable {
-		let toDispose: { (): void; }[] = [];
+		let toDispose: IDisposable[] = [];
 		dom.addClass(el, 'statusbar-entry');
 
 		// Text Container
@@ -196,9 +191,7 @@ class StatusBarEntryItem implements IStatusbarItem {
 
 		return {
 			dispose: () => {
-				while (toDispose.length) {
-					toDispose.pop()();
-				}
+				toDispose = dispose(toDispose);
 			}
 		};
 	}
@@ -230,7 +223,7 @@ class StatusBarEntryItem implements IStatusbarItem {
 		if (action) {
 			if (action.enabled) {
 				this.telemetryService.publicLog('workbenchActionExecuted', { id: action.id, from: 'status bar' });
-				(action.run() || Promise.as(null)).done(() => {
+				(action.run() || TPromise.as(null)).done(() => {
 					action.dispose();
 				}, (err) => this.messageService.show(Severity.Error, toErrorMessage(err)));
 			} else {

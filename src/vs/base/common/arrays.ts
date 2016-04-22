@@ -40,7 +40,7 @@ export function equals<T>(one: T[], other: T[], itemEquals: (a: T, b: T) => bool
 	return true;
 }
 
-export function binarySearch(array: any[], key: any, comparator: (op1: any, op2: any) => number): number {
+export function binarySearch<T>(array: T[], key: T, comparator: (op1: T, op2: T) => number): number {
 	let low = 0,
 		high = array.length - 1;
 
@@ -157,7 +157,7 @@ export function distinct<T>(array: T[], keyFn?: (t: T) => string): T[] {
 		});
 	}
 
-	const seen: { [key: string]: boolean; } = {};
+	const seen: { [key: string]: boolean; } = Object.create(null);
 	return array.filter((elem) => {
 		const key = keyFn(elem);
 		if (seen[key]) {

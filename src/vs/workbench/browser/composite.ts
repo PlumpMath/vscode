@@ -3,17 +3,16 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import {Promise, TPromise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import {IEventEmitter} from 'vs/base/common/eventEmitter';
-import {Dimension, Builder, $} from 'vs/base/browser/builder';
-import {IAction, IActionRunner, Action, ActionRunner} from 'vs/base/common/actions';
-import {IActionItem, ActionsOrientation} from 'vs/base/browser/ui/actionbar/actionbar';
+import {Dimension, Builder} from 'vs/base/browser/builder';
+import {IAction, IActionRunner, ActionRunner} from 'vs/base/common/actions';
+import {IActionItem} from 'vs/base/browser/ui/actionbar/actionbar';
 import {WorkbenchComponent} from 'vs/workbench/common/component';
 import {CompositeEvent} from 'vs/workbench/common/events';
 import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
 import {AsyncDescriptor} from 'vs/platform/instantiation/common/descriptors';
 import {IComposite} from 'vs/workbench/common/composite';
-import {ISelection, Selection} from 'vs/platform/selection/common/selection';
 
 /**
  * Internal composite events to communicate with composite container.
@@ -72,7 +71,7 @@ export abstract class Composite extends WorkbenchComponent implements IComposite
 	public create(parent: Builder): TPromise<void> {
 		this.parent = parent;
 
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 
 	/**
@@ -179,13 +178,6 @@ export abstract class Composite extends WorkbenchComponent implements IComposite
 	}
 
 	/**
-	 * Returns an array of elements that are selected in the composite.
-	 */
-	public getSelection(): ISelection {
-		return Selection.EMPTY;
-	}
-
-	/**
 	 * Returns true if this composite is currently visible and false otherwise.
 	 */
 	public isVisible(): boolean {
@@ -227,7 +219,7 @@ export abstract class CompositeRegistry<T extends Composite> {
 	}
 
 	protected registerComposite(descriptor: CompositeDescriptor<T>): void {
-		if (this.compositById(descriptor.id) !== null) {
+		if (this.compositeById(descriptor.id) !== null) {
 			return;
 		}
 
@@ -235,7 +227,7 @@ export abstract class CompositeRegistry<T extends Composite> {
 	}
 
 	public getComposite(id: string): CompositeDescriptor<T> {
-		return this.compositById(id);
+		return this.compositeById(id);
 	}
 
 	protected getComposits(): CompositeDescriptor<T>[] {
@@ -246,7 +238,7 @@ export abstract class CompositeRegistry<T extends Composite> {
 		this.composits = compositsToSet;
 	}
 
-	private compositById(id: string): CompositeDescriptor<T> {
+	private compositeById(id: string): CompositeDescriptor<T> {
 		for (let i = 0; i < this.composits.length; i++) {
 			if (this.composits[i].id === id) {
 				return this.composits[i];

@@ -9,15 +9,10 @@ import 'vs/css!./media/feedback';
 import nls = require('vs/nls');
 import {IDisposable} from 'vs/base/common/lifecycle';
 import {Builder, $} from 'vs/base/browser/builder';
-import errors = require('vs/base/common/errors');
-import {Promise} from 'vs/base/common/winjs.base';
 import {Dropdown} from 'vs/base/browser/ui/dropdown/dropdown';
-import {IXHRResponse} from 'vs/base/common/http';
 import {IContextViewService} from 'vs/platform/contextview/browser/contextView';
 import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
 import {IWorkspaceContextService} from 'vs/workbench/services/workspace/common/contextService';
-
-const STATUS_TIMEOUT = 500;
 
 export interface IFeedback {
 	feedback: string;
@@ -26,6 +21,7 @@ export interface IFeedback {
 
 export interface IFeedbackService {
 	submitFeedback(feedback: IFeedback): void;
+	getCharacterLimit(sentiment: number): number;
 }
 
 export interface IFeedbackDropdownOptions {
@@ -37,10 +33,10 @@ enum FormEvent {
 	SENDING,
 	SENT,
 	SEND_ERROR
-};
+}
 
 export class FeedbackDropdown extends Dropdown {
-	protected static MAX_FEEDBACK_CHARS: number = 140;
+	protected maxFeedbackCharacters: number;
 
 	protected feedback: string;
 	protected sentiment: number;
@@ -55,6 +51,7 @@ export class FeedbackDropdown extends Dropdown {
 	protected smileyInput: Builder;
 	protected frownyInput: Builder;
 	protected sendButton: Builder;
+	protected remainingCharacterCount: Builder;
 
 	protected requestFeatureLink: string;
 	protected reportIssueLink: string;
@@ -74,12 +71,13 @@ export class FeedbackDropdown extends Dropdown {
 		});
 
 		this.$el.addClass('send-feedback');
-		this.$el.title(nls.localize('sendFeedback', "Send Feedback"));
+		this.$el.title(nls.localize('sendFeedback', "Tweet Feedback"));
 
 		this.feedbackService = options.feedbackService;
 
 		this.feedback = '';
 		this.sentiment = 1;
+		this.maxFeedbackCharacters = this.feedbackService.getCharacterLimit(this.sentiment);
 
 		this.feedbackForm = null;
 		this.feedbackDescriptionInput = null;
@@ -104,7 +102,7 @@ export class FeedbackDropdown extends Dropdown {
 
 		this.feedbackForm = <HTMLFormElement>$form.getHTMLElement();
 
-		$('h2.title').text(nls.localize("label.sendASmile", "Tweet us your feedback")).appendTo($form);
+		$('h2.title').text(nls.localize("label.sendASmile", "Tweet us your feedback.")).appendTo($form);
 
 		this.invoke($('div.cancel').attr('tabindex', '0'), () => {
 			this.hide();
@@ -152,21 +150,20 @@ export class FeedbackDropdown extends Dropdown {
 		$('div').append($('a').attr('target', '_blank').attr('href', this.requestFeatureLink).text(nls.localize("request a missing feature", "Request a missing feature")).attr('tabindex', '0'))
 			.appendTo($contactUsContainer);
 
-		let $charCounter = $('span.char-counter').text('(' + FeedbackDropdown.MAX_FEEDBACK_CHARS + ' ' + nls.localize("characters left", "characters left") + ')');
+		this.remainingCharacterCount = $('span.char-counter').text(this.getCharCountText(0));
 
 		$('h3').text(nls.localize("tell us why?", "Tell us why?"))
-			.append($charCounter)
+			.append(this.remainingCharacterCount)
 			.appendTo($form);
 
 		this.feedbackDescriptionInput = <HTMLTextAreaElement>$('textarea.feedback-description').attr({
 			rows: 3,
-			maxlength: FeedbackDropdown.MAX_FEEDBACK_CHARS,
+			maxlength: this.maxFeedbackCharacters,
 			'aria-label': nls.localize("commentsHeader", "Comments")
 		})
 			.text(this.feedback).attr('required', 'required')
 			.on('keyup', () => {
-				$charCounter.text('(' + (FeedbackDropdown.MAX_FEEDBACK_CHARS - this.feedbackDescriptionInput.value.length) + ' ' + nls.localize("characters left", "characters left") + ')');
-				this.feedbackDescriptionInput.value ? this.sendButton.removeAttribute('disabled') : this.sendButton.attr('disabled', '');
+				this.updateCharCountText();
 			})
 			.appendTo($form).domFocus().getHTMLElement();
 
@@ -189,6 +186,20 @@ export class FeedbackDropdown extends Dropdown {
 		};
 	}
 
+	private getCharCountText(charCount: number): string {
+		let remaining = this.maxFeedbackCharacters - charCount;
+		let text = (remaining === 1)
+			? nls.localize("character left", "character left")
+			: nls.localize("characters left", "characters left");
+
+		return '(' + remaining + ' ' + text + ')';
+	}
+
+	private updateCharCountText(): void {
+		this.remainingCharacterCount.text(this.getCharCountText(this.feedbackDescriptionInput.value.length));
+		this.feedbackDescriptionInput.value ? this.sendButton.removeAttribute('disabled') : this.sendButton.attr('disabled', '');
+	}
+
 	protected setSentiment(smile: boolean): void {
 		if (smile) {
 			this.smileyInput.addClass('checked');
@@ -202,6 +213,9 @@ export class FeedbackDropdown extends Dropdown {
 			this.smileyInput.attr('aria-checked', 'false');
 		}
 		this.sentiment = smile ? 1 : 0;
+		this.maxFeedbackCharacters = this.feedbackService.getCharacterLimit(this.sentiment);
+		this.updateCharCountText();
+		$(this.feedbackDescriptionInput).attr({ maxlength: this.maxFeedbackCharacters });
 	}
 
 	protected invoke(element: Builder, callback: () => void): Builder {
@@ -260,11 +274,11 @@ export class FeedbackDropdown extends Dropdown {
 			case FormEvent.SENDING:
 				this.isSendingFeedback = true;
 				this.sendButton.setClass('send in-progress');
-				this.sendButton.value(nls.localize('feedbackSending', "Sending..."));
+				this.sendButton.value(nls.localize('feedbackSending', "Sending"));
 				break;
 			case FormEvent.SENT:
 				this.isSendingFeedback = false;
-				this.sendButton.setClass('send success').value(nls.localize('feedbackSent', "Thanks :)"));
+				this.sendButton.setClass('send success').value(nls.localize('feedbackSent', "Thanks"));
 				this.resetForm();
 				this.autoHideTimeout = setTimeout(() => {
 					this.hide();
@@ -283,8 +297,11 @@ export class FeedbackDropdown extends Dropdown {
 	}
 
 	protected resetForm(): void {
-		if (this.feedbackDescriptionInput) this.feedbackDescriptionInput.value = '';
+		if (this.feedbackDescriptionInput) {
+			this.feedbackDescriptionInput.value = '';
+		}
 		this.sentiment = 1;
+		this.maxFeedbackCharacters = this.feedbackService.getCharacterLimit(this.sentiment);
 		this.aliasEnabled = false;
 	}
 }

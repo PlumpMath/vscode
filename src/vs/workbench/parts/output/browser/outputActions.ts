@@ -4,16 +4,14 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {Promise, TPromise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import nls = require('vs/nls');
 import {Registry} from 'vs/platform/platform';
-import arrays = require('vs/base/common/arrays');
-import {IDisposable} from 'vs/base/common/lifecycle';
 import {IAction, Action} from 'vs/base/common/actions';
-import {EditorAction, Behaviour} from 'vs/editor/common/editorAction';
+import {EditorAction} from 'vs/editor/common/editorAction';
+import {Behaviour} from 'vs/editor/common/editorActionEnablement';
 import {ICommonCodeEditor, IEditorActionDescriptorData} from 'vs/editor/common/editorCommon';
 import {IOutputChannelRegistry, Extensions, IOutputService, OUTPUT_MODE_ID, OUTPUT_PANEL_ID} from 'vs/workbench/parts/output/common/output';
-import {OutputEditorInput} from 'vs/workbench/parts/output/common/outputEditorInput';
 import {SelectActionItem} from 'vs/base/browser/ui/actionbar/actionbar';
 import {IPartService} from 'vs/workbench/services/part/common/partService';
 import {IPanelService} from 'vs/workbench/services/panel/common/panelService';
@@ -32,27 +30,32 @@ export class ToggleOutputAction extends Action {
 		super(id, label);
 	}
 
-	public run(event?: any): Promise {
+	public run(event?: any): TPromise<any> {
 		const panel = this.panelService.getActivePanel();
 		if (panel && panel.getId() === OUTPUT_PANEL_ID) {
 			this.partService.setPanelHidden(true);
 
-			return Promise.as(null);
+			return TPromise.as(null);
 		}
 
-		return this.outputService.showOutput(this.outputService.getActiveChannel());
+		return this.outputService.getActiveChannel().show();
 	}
 }
 
 export class ClearOutputAction extends Action {
 
-	constructor(@IOutputService private outputService: IOutputService) {
+	constructor(
+		@IOutputService private outputService: IOutputService,
+		@IPanelService private panelService: IPanelService
+	) {
 		super('workbench.output.action.clearOutput', nls.localize('clearOutput', "Clear Output"), 'output-action clear-output');
 	}
 
-	public run(): Promise {
-		this.outputService.clearOutput(this.outputService.getActiveChannel());
-		return Promise.as(true);
+	public run(): TPromise<any> {
+		this.outputService.getActiveChannel().clear();
+		this.panelService.getActivePanel().focus();
+
+		return TPromise.as(true);
 	}
 }
 
@@ -80,7 +83,7 @@ export class ClearOutputEditorAction extends EditorAction {
 	}
 
 	public run(): TPromise<boolean> {
-		this.outputService.clearOutput(this.outputService.getActiveChannel());
+		this.outputService.getActiveChannel().clear();
 		return TPromise.as(false);
 	}
 }
@@ -89,52 +92,43 @@ export class SwitchOutputAction extends Action {
 
 	public static ID = 'workbench.output.action.switchBetweenOutputs';
 
-	constructor(@IOutputService private outputService: IOutputService) {
+	constructor( @IOutputService private outputService: IOutputService) {
 		super(SwitchOutputAction.ID, nls.localize('switchToOutput.label', "Switch to Output"));
 
 		this.class = 'output-action switch-to-output';
 	}
 
-	public run(channel?: string): Promise {
-		return this.outputService.showOutput(channel);
+	public run(channelId?: string): TPromise<any> {
+		return this.outputService.getChannel(channelId).show();
 	}
 }
 
 export class SwitchOutputActionItem extends SelectActionItem {
-	private input: OutputEditorInput;
-	private outputListenerDispose: IDisposable;
 
 	constructor(
 		action: IAction,
 		@IOutputService private outputService: IOutputService
 	) {
-		super(null, action, SwitchOutputActionItem.getChannels(outputService), Math.max(0, SwitchOutputActionItem.getChannels(outputService).indexOf(outputService.getActiveChannel())));
+		super(null, action, SwitchOutputActionItem.getChannelLabels(outputService), Math.max(0, SwitchOutputActionItem.getChannelLabels(outputService).indexOf(outputService.getActiveChannel().label)));
+		this.toDispose.push(this.outputService.onOutputChannel(this.onOutputChannel, this));
+		this.toDispose.push(this.outputService.onActiveOutputChannel(this.onOutputChannel, this));
+	}
 
-		this.outputListenerDispose = this.outputService.onOutputChannel(this.onOutputChannel, this);
+	protected getActionContext(option: string): string {
+		const channel = Registry.as<IOutputChannelRegistry>(Extensions.OutputChannels).getChannels().filter(channelData => channelData.label === option).pop();
+
+		return channel ? channel.id : option;
 	}
 
 	private onOutputChannel(): void {
-		let channels = SwitchOutputActionItem.getChannels(this.outputService);
-		let selected = Math.max(0, channels.indexOf(this.outputService.getActiveChannel()));
+		let channels = SwitchOutputActionItem.getChannelLabels(this.outputService);
+		let selected = Math.max(0, channels.indexOf(this.outputService.getActiveChannel().label));
 
 		this.setOptions(channels, selected);
 	}
 
-	private static getChannels(outputService: IOutputService): string[] {
-		const contributedChannels = (<IOutputChannelRegistry>Registry.as(Extensions.OutputChannels)).getChannels();
-		const usedChannels = outputService.getChannels();
-
-		return arrays.distinct(contributedChannels.concat(usedChannels)).sort(); // sort by name
-	}
-
-	public dispose(): void {
-		super.dispose();
-
-		if (this.outputListenerDispose) {
-			this.outputListenerDispose.dispose();
-			delete this.outputListenerDispose;
-		}
-
-		delete this.input;
+	private static getChannelLabels(outputService: IOutputService): string[] {
+		const contributedChannels = Registry.as<IOutputChannelRegistry>(Extensions.OutputChannels).getChannels().map(channelData => channelData.label);
+		return contributedChannels.sort(); // sort by name
 	}
 }

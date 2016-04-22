@@ -12,7 +12,6 @@ import * as Types from 'vs/base/common/types';
  * are equal to other objects.
  */
 export interface IEqualable {
-	hashCode(): number;
 	equals(other: any): boolean;
 }
 
@@ -158,6 +157,10 @@ export function assign(destination: any, ...sources: any[]): any {
 	return destination;
 }
 
+export function toObject<T,R>(arr: T[], keyMap: (T) => string, valueMap: (T) => R = x => x): { [key: string]: R } {
+	return arr.reduce((o, d) => assign(o, { [keyMap(d)]: valueMap(d) }), Object.create(null));
+}
+
 /**
  * Returns a new object that has all values of {{obj}}
  * plus those from {{defaults}}.
@@ -300,4 +303,9 @@ export function safeStringify(obj: any): string {
 		}
 		return value;
 	});
+}
+
+export function getOrDefault<T,R>(obj: T, fn: (obj: T) => R, defaultValue: R = null): R {
+	const result = fn(obj);
+	return typeof result === 'undefined' ? defaultValue : result;
 }

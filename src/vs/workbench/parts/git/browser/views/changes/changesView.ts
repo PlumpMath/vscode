@@ -15,7 +15,7 @@ import Errors = require('vs/base/common/errors');
 import * as paths from 'vs/base/common/paths';
 import WinJS = require('vs/base/common/winjs.base');
 import Builder = require('vs/base/browser/builder');
-import Keyboard = require('vs/base/browser/keyboardEvent');
+import {StandardKeyboardEvent, IKeyboardEvent} from 'vs/base/browser/keyboardEvent';
 import Actions = require('vs/base/common/actions');
 import ActionBar = require('vs/base/browser/ui/actionbar/actionbar');
 import Tree = require('vs/base/parts/tree/browser/tree');
@@ -38,10 +38,8 @@ import {IEditorInput} from 'vs/platform/editor/common/editor';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
 import {IMessageService} from 'vs/platform/message/common/message';
 import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
-import {ISelection, StructuredSelection} from 'vs/platform/selection/common/selection';
 import {IEventService} from 'vs/platform/event/common/event';
 import {CommonKeybindings} from 'vs/base/common/keyCodes';
-import {IKeyboardEvent} from 'vs/base/browser/dom';
 
 import IGitService = git.IGitService;
 
@@ -135,6 +133,7 @@ export class ChangesView extends EventEmitter.EventEmitter implements GitView.IV
 				showMessage: true,
 				validation: (): InputBox.IMessage => null
 			},
+			ariaLabel: nls.localize('commitMessageAriaLabel', "Git: Type commit message and press {0} to commit", ChangesView.COMMIT_KEYBINDING),
 			flexibleHeight: true
 		});
 
@@ -142,7 +141,7 @@ export class ChangesView extends EventEmitter.EventEmitter implements GitView.IV
 		this.commitInputBox.onDidHeightChange((value) => this.emit('heightchange', value));
 
 		$(this.commitInputBox.inputElement).on('keydown', (e:KeyboardEvent) => {
-			var keyboardEvent = new Keyboard.StandardKeyboardEvent(e);
+			var keyboardEvent = new StandardKeyboardEvent(e);
 
 			if (keyboardEvent.equals(CommonKeybindings.CTRLCMD_ENTER) || keyboardEvent.equals(CommonKeybindings.CTRLCMD_S)) {
 				if (this.smartCommitAction.enabled) {
@@ -175,7 +174,7 @@ export class ChangesView extends EventEmitter.EventEmitter implements GitView.IV
 		}, {
 			indentPixels: 0,
 			twistiePixels: 20,
-			ariaLabel: nls.localize('treeAriaLabel', "Changes View")
+			ariaLabel: nls.localize('treeAriaLabel', "Git Changes View")
 		});
 
 		this.tree.setInput(this.gitService.getModel().getStatus());
@@ -222,12 +221,8 @@ export class ChangesView extends EventEmitter.EventEmitter implements GitView.IV
 
 		} else {
 			this.tree.onHidden();
-			return WinJS.Promise.as(null);
+			return WinJS.TPromise.as(null);
 		}
-	}
-
-	public getSelection():ISelection {
-		return new StructuredSelection(this.tree.getSelection());
 	}
 
 	public getControl(): Tree.ITree {
@@ -259,12 +254,12 @@ export class ChangesView extends EventEmitter.EventEmitter implements GitView.IV
 				new ActionBar.Separator(),
 				this.instantiationService.createInstance(GitActions.CommitAction, this),
 				this.instantiationService.createInstance(GitActions.StageAndCommitAction, this),
-				this.instantiationService.createInstance(GitActions.UndoLastCommitAction),
+				this.instantiationService.createInstance(GitActions.UndoLastCommitAction, GitActions.UndoLastCommitAction.ID, GitActions.UndoLastCommitAction.LABEL),
 				new ActionBar.Separator(),
 				this.instantiationService.createInstance(GitActions.GlobalUnstageAction),
 				this.instantiationService.createInstance(GitActions.GlobalUndoAction),
 				new ActionBar.Separator(),
-				new Actions.Action('show.gitOutput', nls.localize('showOutput', "Show Git Output"), null, true, () => this.outputService.showOutput('Git'))
+				new Actions.Action('show.gitOutput', nls.localize('showOutput', "Show Git Output"), null, true, () => this.outputService.getChannel('Git').show())
 			];
 
 			this.secondaryActions.forEach(a => this.toDispose.push(a));
@@ -294,26 +289,24 @@ export class ChangesView extends EventEmitter.EventEmitter implements GitView.IV
 		}
 	}
 
-	private onEditorInputChanged(input: IEditorInput): WinJS.Promise {
+	private onEditorInputChanged(input: IEditorInput): WinJS.TPromise<void> {
 		if (!this.tree) {
-			return WinJS.Promise.as(null);
+			return WinJS.TPromise.as(null);
 		}
 
 		var status = this.getStatusFromInput(input);
 
 		if (!status) {
 			this.tree.clearSelection();
-			this.tree.clearFocus();
 		}
 
 		if (this.visible && this.tree.getSelection().indexOf(status) === -1) {
 			return this.tree.reveal(status, 0.5).then(() => {
 				this.tree.setSelection([status], { origin: 'implicit' });
-				this.tree.setFocus(status);
 			});
 		}
 
-		return WinJS.Promise.as(null);
+		return WinJS.TPromise.as(null);
 	}
 
 	private onSelection(e: Tree.ISelectionEvent): void {
@@ -442,7 +435,7 @@ export class ChangesView extends EventEmitter.EventEmitter implements GitView.IV
 			this.$el = null;
 		}
 
-		this.toDispose = Lifecycle.disposeAll(this.toDispose);
+		this.toDispose = Lifecycle.dispose(this.toDispose);
 
 		super.dispose();
 	}

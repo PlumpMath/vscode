@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {Promise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import nls = require('vs/nls');
 import {Registry} from 'vs/platform/platform';
 import {Action} from 'vs/base/common/actions';
@@ -24,13 +24,13 @@ export class ToggleSidebarVisibilityAction extends Action {
 		this.enabled = !!this.partService;
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		let hideSidebar = !this.partService.isSideBarHidden();
 		this.partService.setSideBarHidden(hideSidebar);
 
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 }
 
 let registry = <IWorkbenchActionRegistry>Registry.as(Extensions.WorkbenchActions);
-registry.registerWorkbenchAction(new SyncActionDescriptor(ToggleSidebarVisibilityAction, ID, LABEL, { primary: KeyMod.CtrlCmd | KeyCode.KEY_B }), nls.localize('view', "View"));
+registry.registerWorkbenchAction(new SyncActionDescriptor(ToggleSidebarVisibilityAction, ID, LABEL, { primary: KeyMod.CtrlCmd | KeyCode.KEY_B }), nls.localize('view', "View"), ['side', 'bar', 'visibility']);

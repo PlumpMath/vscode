@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {Promise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import nls = require('vs/nls');
 import {Registry} from 'vs/platform/platform';
 import {Action} from 'vs/base/common/actions';
@@ -22,10 +22,10 @@ export class NavigateForwardAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		this.historyService.forward();
 
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 }
 
@@ -38,10 +38,10 @@ export class NavigateBackwardsAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		this.historyService.back();
 
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 }
 
@@ -51,11 +51,11 @@ registry.registerWorkbenchAction(new SyncActionDescriptor(NavigateForwardAction,
 	win: { primary: KeyMod.Alt | KeyCode.RightArrow },
 	mac: { primary: KeyMod.WinCtrl | KeyMod.Shift | KeyCode.US_MINUS },
 	linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.US_MINUS }
-}));
+}), ['go', 'forward']);
 
 registry.registerWorkbenchAction(new SyncActionDescriptor(NavigateBackwardsAction, NAVIGATE_BACKWARDS_ID, NAVIGATE_BACKWARDS_LABEL, {
 	primary: null,
 	win: { primary: KeyMod.Alt | KeyCode.LeftArrow },
 	mac: { primary: KeyMod.WinCtrl | KeyCode.US_MINUS },
 	linux: { primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.US_MINUS }
-}));
+}), ['go', 'backward']);

@@ -3,32 +3,31 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
-import 'vs/css!./media/extensions';
-
 import nls = require('vs/nls');
-import { IDisposable, disposeAll } from 'vs/base/common/lifecycle';
+import { IDisposable, dispose } from 'vs/base/common/lifecycle';
 import { TPromise } from 'vs/base/common/winjs.base';
 import { isNumber } from 'vs/base/common/types';
+import { PagedModel, mapPager } from 'vs/base/common/paging';
+import { ThrottledDelayer } from 'vs/base/common/async';
 import * as dom from 'vs/base/browser/dom';
 import Severity from 'vs/base/common/severity';
 import { onUnexpectedError } from 'vs/base/common/errors';
-import { IAutoFocus, Mode, IModel, IDataSource, IRenderer, IRunner, IFilter, IContext } from 'vs/base/parts/quickopen/common/quickOpen';
-import { since } from 'vs/base/common/dates';
+import { IAutoFocus, Mode, IModel, IDataSource, IRenderer, IRunner, IContext, IAccessiblityProvider } from 'vs/base/parts/quickopen/common/quickOpen';
+import { QuickOpenPagedModel, IPagedRenderer } from 'vs/base/parts/quickopen/common/quickOpenPaging';
 import { matchesContiguousSubString } from 'vs/base/common/filters';
 import { QuickOpenHandler } from 'vs/workbench/browser/quickopen';
 import { IHighlight } from 'vs/base/parts/quickopen/browser/quickOpenModel';
-import { IExtensionsService, IGalleryService, IExtension } from 'vs/workbench/parts/extensions/common/extensions';
+import { IExtensionsService, IGalleryService, IExtensionTipsService, IExtension, IQueryResult } from 'vs/workbench/parts/extensions/common/extensions';
 import { InstallAction, UninstallAction } from 'vs/workbench/parts/extensions/electron-browser/extensionsActions';
 import { IMessageService } from 'vs/platform/message/common/message';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IWorkspaceContextService } from 'vs/workbench/services/workspace/common/contextService';
-import { IQuickOpenService } from 'vs/workbench/services/quickopen/common/quickOpenService';
 import { HighlightedLabel } from 'vs/base/browser/ui/highlightedlabel/highlightedLabel';
 import { Action } from 'vs/base/common/actions';
-import * as semver from 'semver';
 import { ActionBar } from 'vs/base/browser/ui/actionbar/actionbar';
 import { shell } from 'electron';
+import { extensionEquals, getOutdatedExtensions } from 'vs/workbench/parts/extensions/common/extensionsUtil';
 
 const $ = dom.emmet;
 
@@ -36,6 +35,7 @@ const InstallLabel = nls.localize('install', "Install Extension");
 const UpdateLabel = nls.localize('update', "Update Extension");
 
 export interface IHighlights {
+	id: IHighlight[];
 	name: IHighlight[];
 	displayName: IHighlight[];
 	description: IHighlight[];
@@ -64,20 +64,17 @@ interface ITemplateData {
 	disposables: IDisposable[];
 }
 
-function getHighlights(input: string, extension: IExtension): IHighlights {
+function getHighlights(input: string, extension: IExtension, nullIfEmpty = true): IHighlights {
+	const id = matchesContiguousSubString(input, `${ extension.publisher }.${ extension.name }`) || [];
 	const name = matchesContiguousSubString(input, extension.name) || [];
 	const displayName = matchesContiguousSubString(input, extension.displayName) || [];
 	const description = matchesContiguousSubString(input, extension.description) || [];
 
-	if (!name.length && !displayName.length && !description.length) {
+	if (nullIfEmpty && !id.length && !name.length && !displayName.length && !description.length) {
 		return null;
 	}
 
-	return { name, displayName, description };
-}
-
-function extensionEquals(one: IExtension, other: IExtension): boolean {
-	return one.publisher === other.publisher && one.name === other.name;
+	return { id, name, displayName, description };
 }
 
 function extensionEntryCompare(one: IExtensionEntry, other: IExtensionEntry): number {
@@ -92,6 +89,21 @@ function extensionEntryCompare(one: IExtensionEntry, other: IExtensionEntry): nu
 	return one.extension.displayName.localeCompare(other.extension.displayName);
 }
 
+class OpenLicenseAction extends Action {
+
+	constructor(
+		@IWorkspaceContextService private contextService: IWorkspaceContextService
+	) {
+		super('extensions.open-license', nls.localize('license', "License"), '', true);
+	}
+
+	public run(extension: IExtension): TPromise<any> {
+		const url = `${ this.contextService.getConfiguration().env.extensionsGallery.itemUrl }/${ extension.publisher }.${ extension.name }/license`;
+		shell.openExternal(url);
+		return TPromise.as(null);
+	}
+}
+
 class OpenInGalleryAction extends Action {
 
 	constructor(
@@ -100,7 +112,7 @@ class OpenInGalleryAction extends Action {
 		@IWorkspaceContextService private contextService: IWorkspaceContextService,
 		@IInstantiationService protected instantiationService: IInstantiationService
 	) {
-		super('extensions.open-in-gallery', 'Readme', '', true);
+		super('extensions.open-in-gallery', nls.localize('readme', "Readme"), '', true);
 	}
 
 	public run(extension: IExtension): TPromise<any> {
@@ -162,7 +174,14 @@ class InstallRunner implements IRunner<IExtensionEntry> {
 	}
 }
 
-class Renderer implements IRenderer<IExtensionEntry> {
+class AccessibilityProvider implements IAccessiblityProvider<IExtensionEntry> {
+
+	public getAriaLabel(entry: IExtensionEntry): string {
+		return nls.localize('extensionAriaLabel', "{0}, {1}, extensions picker", entry.extension.displayName, entry.extension.description);
+	}
+}
+
+class Renderer implements IPagedRenderer<IExtensionEntry> {
 
 	constructor(
 		@IInstantiationService private instantiationService: IInstantiationService,
@@ -200,9 +219,24 @@ class Renderer implements IRenderer<IExtensionEntry> {
 		};
 	}
 
+	renderPlaceholder(index: number, templateId: string, data: ITemplateData): void {
+		dom.addClass(data.root, 'loading');
+
+		data.author.textContent = nls.localize('author', 'Author');
+		data.displayName.set(nls.localize('name', 'Name'));
+		data.version.textContent = '0.0.1';
+		data.installCount.textContent = '';
+		dom.removeClass(data.installCount, 'octicon');
+		dom.removeClass(data.installCount, 'octicon-cloud-download');
+		data.actionbar.clear();
+		data.description.set(nls.localize('description', 'Description'));
+		data.disposables = dispose(data.disposables);
+	}
+
 	renderElement(entry: IExtensionEntry, templateId: string, data: ITemplateData): void {
+		dom.removeClass(data.root, 'loading');
+
 		const extension = entry.extension;
-		const date = extension.galleryInformation ? extension.galleryInformation.date : null;
 		const publisher = extension.galleryInformation ? extension.galleryInformation.publisherDisplayName : extension.publisher;
 		const installCount = extension.galleryInformation ? extension.galleryInformation.installCount : null;
 		const actionOptions = { icon: true, label: false };
@@ -212,6 +246,7 @@ class Renderer implements IRenderer<IExtensionEntry> {
 
 			if (entry.extension.galleryInformation) {
 				data.actionbar.push(this.instantiationService.createInstance(OpenInGalleryAction, entry.state !== ExtensionState.Installed), { label: true, icon: false });
+				data.actionbar.push(this.instantiationService.createInstance(OpenLicenseAction), { label: true, icon: false });
 			}
 
 			switch (entry.state) {
@@ -240,8 +275,8 @@ class Renderer implements IRenderer<IExtensionEntry> {
 		data.actionbar.context = extension;
 		updateActions();
 
-		data.disposables = disposeAll(data.disposables);
-		data.disposables.push(this.extensionsService.onDidInstallExtension(e => onExtensionStateChange(e, ExtensionState.Installed)));
+		data.disposables = dispose(data.disposables);
+		data.disposables.push(this.extensionsService.onDidInstallExtension(e => onExtensionStateChange(e.extension, ExtensionState.Installed)));
 		data.disposables.push(this.extensionsService.onDidUninstallExtension(e => onExtensionStateChange(e, ExtensionState.Uninstalled)));
 
 		data.displayName.set(extension.displayName, entry.highlights.displayName);
@@ -274,7 +309,7 @@ class Renderer implements IRenderer<IExtensionEntry> {
 	disposeTemplate(templateId: string, data: ITemplateData): void {
 		data.displayName.dispose();
 		data.description.dispose();
-		data.disposables = disposeAll(data.disposables);
+		data.disposables = dispose(data.disposables);
 	}
 }
 
@@ -303,6 +338,7 @@ class LocalExtensionsModel implements IModel<IExtensionEntry> {
 
 	public dataSource = new DataSource();
 	public renderer: IRenderer<IExtensionEntry>;
+	public accessibilityProvider: IAccessiblityProvider<IExtensionEntry> = new AccessibilityProvider();
 	public runner = { run: () => false };
 	public entries: IExtensionEntry[];
 
@@ -316,7 +352,7 @@ class LocalExtensionsModel implements IModel<IExtensionEntry> {
 
 	public set input(input: string) {
 		this.entries = this.extensions
-			.map(extension => ({ extension, highlights: getHighlights(input, extension) }))
+			.map(extension => ({ extension, highlights: getHighlights(input.trim(), extension) }))
 			.filter(({ highlights }) => !!highlights)
 			.map(({ extension, highlights }) => ({
 				extension,
@@ -337,6 +373,10 @@ export class LocalExtensionsHandler extends QuickOpenHandler {
 	) {
 		super();
 		this.modelPromise = null;
+	}
+
+	public getAriaLabel(): string {
+		return nls.localize('localExtensionsHandlerAriaLabel', "Type to narrow down the list of installed extensions");
 	}
 
 	getResults(input: string): TPromise<IModel<IExtensionEntry>> {
@@ -364,45 +404,9 @@ export class LocalExtensionsHandler extends QuickOpenHandler {
 	}
 }
 
-class GalleryExtensionsModel implements IModel<IExtensionEntry> {
-
-	public dataSource = new DataSource();
-	public renderer: IRenderer<IExtensionEntry>;
-	public runner: IRunner<IExtensionEntry>;
-	public entries: IExtensionEntry[];
-
-	constructor(
-		private galleryExtensions: IExtension[],
-		private localExtensions: IExtension[],
-		@IInstantiationService instantiationService: IInstantiationService
-	) {
-		this.renderer = instantiationService.createInstance(Renderer);
-		this.runner = instantiationService.createInstance(InstallRunner);
-		this.entries = [];
-	}
-
-	public set input(input: string) {
-		this.entries = this.galleryExtensions
-			.map(extension => ({ extension, highlights: getHighlights(input, extension) }))
-			.filter(({ highlights }) => !!highlights)
-			.map(({ extension, highlights }: { extension: IExtension, highlights: IHighlights }) => {
-				const local = this.localExtensions.filter(local => extensionEquals(local, extension))[0];
-
-				return {
-					extension,
-					highlights,
-					state: local
-						? (local.version === extension.version ? ExtensionState.Installed : ExtensionState.Outdated)
-						: ExtensionState.Uninstalled
-				};
-			})
-			.sort(extensionEntryCompare);
-	}
-}
-
 export class GalleryExtensionsHandler extends QuickOpenHandler {
 
-	private modelPromise: TPromise<GalleryExtensionsModel>;
+	private delayer: ThrottledDelayer<any>;
 
 	constructor(
 		@IInstantiationService private instantiationService: IInstantiationService,
@@ -411,23 +415,36 @@ export class GalleryExtensionsHandler extends QuickOpenHandler {
 		@ITelemetryService private telemetryService: ITelemetryService
 	) {
 		super();
+		this.delayer = new ThrottledDelayer(500);
 	}
 
-	getResults(input: string): TPromise<IModel<IExtensionEntry>> {
-		if (!this.modelPromise) {
-			this.telemetryService.publicLog('extensionGallery:open');
-			this.modelPromise = TPromise.join<any>([this.galleryService.query(), this.extensionsService.getInstalled()])
-				.then(result => this.instantiationService.createInstance(GalleryExtensionsModel, result[0], result[1]));
-		}
+	public getAriaLabel(): string {
+		return nls.localize('galleryExtensionsHandlerAriaLabel', "Type to narrow down the list of extensions from the gallery");
+	}
 
-		return this.modelPromise.then(model => {
-			model.input = input;
-			return model;
+	getResults(text: string): TPromise<IModel<number>> {
+		return this.extensionsService.getInstalled().then(localExtensions => {
+			return this.delayer.trigger(() => this.galleryService.query({ text })).then((result: IQueryResult) => {
+				const pager = mapPager(result, extension => {
+					const [local] = localExtensions.filter(local => extensionEquals(local, extension));
+
+					return {
+						extension,
+						highlights: getHighlights(text.trim(), extension, false),
+						state: local
+							? (local.version === extension.version ? ExtensionState.Installed : ExtensionState.Outdated)
+							: ExtensionState.Uninstalled
+					};
+				});
+
+				return new QuickOpenPagedModel<IExtensionEntry>(
+					new PagedModel(pager),
+					new DataSource(),
+					this.instantiationService.createInstance(Renderer),
+					this.instantiationService.createInstance(InstallRunner)
+				);
+			});
 		});
-	}
-
-	onClose(canceled: boolean): void {
-		this.modelPromise = null;
 	}
 
 	getEmptyLabel(input: string): string {
@@ -442,13 +459,13 @@ export class GalleryExtensionsHandler extends QuickOpenHandler {
 class OutdatedExtensionsModel implements IModel<IExtensionEntry> {
 
 	public dataSource = new DataSource();
+	public accessibilityProvider: IAccessiblityProvider<IExtensionEntry> = new AccessibilityProvider();
 	public renderer: IRenderer<IExtensionEntry>;
 	public runner: IRunner<IExtensionEntry>;
 	public entries: IExtensionEntry[];
 
 	constructor(
-		private galleryExtensions: IExtension[],
-		private localExtensions: IExtension[],
+		private outdatedExtensions: IExtension[],
 		@IInstantiationService instantiationService: IInstantiationService
 	) {
 		this.renderer = instantiationService.createInstance(Renderer);
@@ -457,13 +474,10 @@ class OutdatedExtensionsModel implements IModel<IExtensionEntry> {
 	}
 
 	public set input(input: string) {
-		this.entries = this.galleryExtensions
-			.map(extension => ({ extension, highlights: getHighlights(input, extension) }))
-			.filter(({ extension, highlights }) => {
-				const local = this.localExtensions.filter(local => extensionEquals(local, extension))[0];
-				return local && semver.lt(local.version, extension.version) && !!highlights;
-			})
-			.map(({ extension, highlights }: { extension: IExtension, highlights: IHighlights }) => ({
+		this.entries = this.outdatedExtensions
+			.map(extension => ({ extension, highlights: getHighlights(input.trim(), extension) }))
+			.filter(({ highlights }) => !!highlights)
+			.map(({ extension, highlights }) => ({
 				extension,
 				highlights,
 				state: ExtensionState.Outdated
@@ -485,11 +499,15 @@ export class OutdatedExtensionsHandler extends QuickOpenHandler {
 		super();
 	}
 
+	public getAriaLabel(): string {
+		return nls.localize('outdatedExtensionsHandlerAriaLabel', "Type to narrow down the list of outdated extensions");
+	}
+
 	getResults(input: string): TPromise<IModel<IExtensionEntry>> {
 		if (!this.modelPromise) {
 			this.telemetryService.publicLog('extensionGallery:open');
-			this.modelPromise = TPromise.join<any>([this.galleryService.query(), this.extensionsService.getInstalled()])
-				.then(result => this.instantiationService.createInstance(OutdatedExtensionsModel, result[0], result[1]));
+			this.modelPromise = this.instantiationService.invokeFunction(getOutdatedExtensions)
+				.then(outdated => this.instantiationService.createInstance(OutdatedExtensionsModel, outdated));
 		}
 
 		return this.modelPromise.then(model => {
@@ -504,6 +522,82 @@ export class OutdatedExtensionsHandler extends QuickOpenHandler {
 
 	getEmptyLabel(input: string): string {
 		return nls.localize('noOutdatedExtensions', "No outdated extensions found");
+	}
+
+	getAutoFocus(searchValue: string): IAutoFocus {
+		return { autoFocusFirstEntry: true };
+	}
+}
+
+
+class SuggestedExtensionsModel implements IModel<IExtensionEntry> {
+
+	public dataSource = new DataSource();
+	public renderer: IRenderer<IExtensionEntry>;
+	public runner: IRunner<IExtensionEntry>;
+	public entries: IExtensionEntry[];
+
+	constructor(
+		private suggestedExtensions: IExtension[],
+		private localExtensions: IExtension[],
+		@IInstantiationService instantiationService: IInstantiationService
+	) {
+		this.renderer = instantiationService.createInstance(Renderer);
+		this.runner = instantiationService.createInstance(InstallRunner);
+		this.entries = [];
+	}
+
+	public set input(input: string) {
+		this.entries = this.suggestedExtensions
+			.map(extension => ({ extension, highlights: getHighlights(input.trim(), extension) }))
+			.filter(({ extension, highlights }) => {
+				const local = this.localExtensions.filter(local => extensionEquals(local, extension))[0];
+				return !local && !!highlights;
+			})
+			.map(({ extension, highlights }: { extension: IExtension, highlights: IHighlights }) => {
+				return {
+					extension,
+					highlights,
+					state: ExtensionState.Uninstalled
+				};
+			})
+			.sort(extensionEntryCompare);
+	}
+}
+
+
+export class SuggestedExtensionHandler extends QuickOpenHandler {
+
+	private modelPromise: TPromise<SuggestedExtensionsModel>;
+
+	constructor(
+		@IExtensionTipsService private extensionTipsService: IExtensionTipsService,
+		@IInstantiationService private instantiationService: IInstantiationService,
+		@ITelemetryService private telemetryService: ITelemetryService,
+		@IExtensionsService private extensionsService: IExtensionsService
+	) {
+		super();
+	}
+
+	getResults(input: string): TPromise<IModel<IExtensionEntry>> {
+		if (!this.modelPromise) {
+			this.telemetryService.publicLog('extensionRecommendations:open');
+			this.modelPromise = TPromise.join<any>([this.extensionTipsService.getRecommendations(), this.extensionsService.getInstalled()])
+				.then(result => this.instantiationService.createInstance(SuggestedExtensionsModel, result[0], result[1]));
+		}
+
+		return this.modelPromise.then(model => {
+			model.input = input;
+			return model;
+		});
+	}
+
+	onClose(canceled: boolean): void {
+		this.modelPromise = null;
+	}
+
+	getEmptyLabel(input: string): string {
+		return nls.localize('noRecommendedExtensions', "No recommended extensions");
 	}
 
 	getAutoFocus(searchValue: string): IAutoFocus {

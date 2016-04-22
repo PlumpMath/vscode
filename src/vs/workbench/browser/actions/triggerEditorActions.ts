@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {Promise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import nls = require('vs/nls');
 import types = require('vs/base/common/types');
 import {Action, IAction} from 'vs/base/common/actions';
@@ -31,17 +31,17 @@ export class SplitEditorAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 
 		// Can only split with active editor
 		let activeEditor = this.editorService.getActiveEditor();
 		if (!activeEditor) {
-			return Promise.as(true);
+			return TPromise.as(true);
 		}
 
 		// Return if the editor to split does not support split editing
 		if (!(<BaseEditor>activeEditor).supportsSplitEditor()) {
-			return Promise.as(true);
+			return TPromise.as(true);
 		}
 
 		// Count editors
@@ -84,7 +84,7 @@ export class SplitEditorAction extends Action {
 			return this.editorService.openEditor(activeEditor.input, null, targetPosition);
 		}
 
-		return Promise.as(true);
+		return TPromise.as(true);
 	}
 }
 
@@ -96,12 +96,12 @@ export class CycleEditorAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 
 		// Can cycle split with active editor
 		let activeEditor = this.editorService.getActiveEditor();
 		if (!activeEditor) {
-			return Promise.as(false);
+			return TPromise.as(false);
 		}
 
 		// Cycle to the left and use module to start at 0 again
@@ -126,7 +126,7 @@ export class FocusFirstEditorAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 
 		// Find left editor and focus it
 		let editors = this.editorService.getVisibleEditors();
@@ -152,7 +152,7 @@ export class FocusFirstEditorAction extends Action {
 			}
 		}
 
-		return Promise.as(true);
+		return TPromise.as(true);
 	}
 }
 
@@ -171,7 +171,7 @@ export abstract class BaseFocusSideEditorAction extends Action {
 
 	protected abstract getTargetEditorSide(): Position;
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 
 		// Require at least the reference editor to be visible
 		let editors = this.editorService.getVisibleEditors();
@@ -213,7 +213,7 @@ export abstract class BaseFocusSideEditorAction extends Action {
 			}
 		}
 
-		return Promise.as(true);
+		return TPromise.as(true);
 	}
 }
 
@@ -269,12 +269,12 @@ export class NavigateToLeftEditorAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 
 		// Require an active editor
 		let activeEditor = this.editorService.getActiveEditor();
 		if (!activeEditor) {
-			return Promise.as(true);
+			return TPromise.as(true);
 		}
 
 
@@ -309,7 +309,7 @@ export class NavigateToRightEditorAction extends Action {
 		this.navigateActions[Position.RIGHT] = instantiationService.createInstance(FocusThirdEditorAction, FOCUS_THIRD_EDITOR_ACTION_ID, FOCUS_THIRD_EDITOR_ACTION_LABEL);
 	}
 
-	public run(event?: any): Promise {
+	public run(event?: any): TPromise<any> {
 
 		// Find the next position to the right to use
 		let nextPosition: Position;
@@ -327,7 +327,7 @@ export class NavigateToRightEditorAction extends Action {
 			return this.navigateActions[nextPosition].run(event);
 		}
 
-		return Promise.as(true);
+		return TPromise.as(true);
 	}
 }
 
@@ -336,7 +336,7 @@ export class OpenToSideAction extends Action {
 	public static OPEN_TO_SIDE_ID = 'workbench.action.openToSide';
 	public static OPEN_TO_SIDE_LABEL = nls.localize('openToSide', "Open to the Side");
 
-	constructor( @IWorkbenchEditorService private editorService: IWorkbenchEditorService) {
+	constructor(@IWorkbenchEditorService private editorService: IWorkbenchEditorService) {
 		super(OpenToSideAction.OPEN_TO_SIDE_ID, OpenToSideAction.OPEN_TO_SIDE_LABEL);
 
 		this.class = 'quick-open-sidebyside';
@@ -349,13 +349,21 @@ export class OpenToSideAction extends Action {
 		this.enabled = (!activeEditor || activeEditor.position !== Position.RIGHT);
 	}
 
-	public run(context: any): Promise {
+	public run(context: any): TPromise<any> {
 		let entry = toEditorQuickOpenEntry(context);
 		if (entry) {
-			return this.editorService.openEditor(<EditorInput>entry.getInput(), entry.getOptions(), true);
+			let typedInputPromise: TPromise<EditorInput>;
+			let input = entry.getInput();
+			if (input instanceof EditorInput) {
+				typedInputPromise = TPromise.as(input);
+			} else {
+				typedInputPromise = this.editorService.inputToType(input);
+			}
+
+			return typedInputPromise.then(typedInput => this.editorService.openEditor(typedInput, entry.getOptions(), true));
 		}
 
-		return Promise.as(false);
+		return TPromise.as(false);
 	}
 }
 
@@ -414,21 +422,19 @@ function toEditorQuickOpenEntry(element: any): IEditorQuickOpenEntry {
 	return null;
 }
 
-let CLOSE_EDITOR_ACTION_ID = 'workbench.action.closeActiveEditor';
-let CLOSE_EDITOR_ACTION_LABEL = nls.localize('closeActiveEditor', "Close Editor");
 export class CloseEditorAction extends Action {
 
 	constructor(id: string, label: string, @IWorkbenchEditorService private editorService: IWorkbenchEditorService) {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		let activeEditor = this.editorService.getActiveEditor();
 		if (activeEditor) {
 			return this.editorService.closeEditor(activeEditor);
 		}
 
-		return Promise.as(false);
+		return TPromise.as(false);
 	}
 }
 
@@ -440,7 +446,7 @@ export class CloseAllEditorsAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		return this.editorService.closeEditors();
 	}
 }
@@ -453,7 +459,7 @@ export class CloseOtherEditorsAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		return this.editorService.closeEditors(true);
 	}
 }
@@ -466,7 +472,7 @@ export class MoveEditorLeftAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		let activeEditor = this.editorService.getActiveEditor();
 		if (activeEditor && (activeEditor.position === Position.CENTER || activeEditor.position === Position.RIGHT)) {
 			let newPosition = (activeEditor.position === Position.CENTER) ? Position.LEFT : Position.CENTER;
@@ -475,7 +481,7 @@ export class MoveEditorLeftAction extends Action {
 			this.editorService.moveEditor(activeEditor.position, newPosition);
 		}
 
-		return Promise.as(false);
+		return TPromise.as(false);
 	}
 }
 
@@ -487,7 +493,7 @@ export class MoveEditorRightAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		let editors = this.editorService.getVisibleEditors();
 		let activeEditor = this.editorService.getActiveEditor();
 		if ((editors.length === 2 && activeEditor.position === Position.LEFT) || (editors.length === 3 && activeEditor.position !== Position.RIGHT)) {
@@ -497,7 +503,7 @@ export class MoveEditorRightAction extends Action {
 			this.editorService.moveEditor(activeEditor.position, newPosition);
 		}
 
-		return Promise.as(false);
+		return TPromise.as(false);
 	}
 }
 
@@ -509,10 +515,10 @@ export class MinimizeOtherEditorsAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		this.editorService.arrangeEditors(EditorArrangement.MINIMIZE_OTHERS);
 
-		return Promise.as(false);
+		return TPromise.as(false);
 	}
 }
 
@@ -524,10 +530,10 @@ export class EvenEditorWidthsAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		this.editorService.arrangeEditors(EditorArrangement.EVEN_WIDTH);
 
-		return Promise.as(false);
+		return TPromise.as(false);
 	}
 }
 
@@ -544,13 +550,13 @@ export class MaximizeEditorAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		if (this.editorService.getActiveEditor()) {
 			this.editorService.arrangeEditors(EditorArrangement.MINIMIZE_OTHERS);
 			this.partService.setSideBarHidden(true);
 		}
 
-		return Promise.as(false);
+		return TPromise.as(false);
 	}
 }
 
@@ -561,27 +567,27 @@ actionBarRegistry.registerActionBarContributor(Scope.VIEWER, QuickOpenActionCont
 // Contribute to Workbench Actions
 const category = nls.localize('view', "View");
 let registry = <IWorkbenchActionRegistry>Registry.as(ActionExtensions.WorkbenchActions);
-registry.registerWorkbenchAction(new SyncActionDescriptor(CloseAllEditorsAction, CLOSE_ALL_EDITORS_ACTION_ID, CLOSE_ALL_EDITORS_ACTION_LABEL), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(CloseOtherEditorsAction, CLOSE_OTHER_EDITORS_ACTION_ID, CLOSE_OTHER_EDITORS_ACTION_LABEL), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(SplitEditorAction, SPLIT_EDITOR_ACTION_ID, SPLIT_EDITOR_ACTION_LABEL, { primary: KeyMod.CtrlCmd | KeyCode.US_BACKSLASH }), category);
+registry.registerWorkbenchAction(new SyncActionDescriptor(CloseAllEditorsAction, CLOSE_ALL_EDITORS_ACTION_ID, CLOSE_ALL_EDITORS_ACTION_LABEL), category, ['close', 'all', 'editors']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(CloseOtherEditorsAction, CLOSE_OTHER_EDITORS_ACTION_ID, CLOSE_OTHER_EDITORS_ACTION_LABEL), category, ['close', 'other', 'editors']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(SplitEditorAction, SPLIT_EDITOR_ACTION_ID, SPLIT_EDITOR_ACTION_LABEL, { primary: KeyMod.CtrlCmd | KeyCode.US_BACKSLASH }), category, ['split', 'editor', 'duplicate']);
 registry.registerWorkbenchAction(new SyncActionDescriptor(CycleEditorAction, CYCLE_EDITOR_ACTION_ID, CYCLE_EDITOR_ACTION_LABEL, {
 	primary: KeyMod.CtrlCmd | KeyCode.US_BACKTICK,
 	// on mac this keybinding is reserved to cycle between windows
 	mac: { primary: null }
-}), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(FocusFirstEditorAction, FOCUS_FIRST_EDITOR_ACTION_ID, FOCUS_FIRST_EDITOR_ACTION_LABEL, { primary: KeyMod.CtrlCmd | KeyCode.KEY_1 }), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(FocusSecondEditorAction, FOCUS_SECOND_EDITOR_ACTION_ID, FOCUS_SECOND_EDITOR_ACTION_LABEL, { primary: KeyMod.CtrlCmd | KeyCode.KEY_2 }), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(FocusThirdEditorAction, FOCUS_THIRD_EDITOR_ACTION_ID, FOCUS_THIRD_EDITOR_ACTION_LABEL, { primary: KeyMod.CtrlCmd | KeyCode.KEY_3 }), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(EvenEditorWidthsAction, EVEN_EDITOR_WIDTHS_ACTION_ID, EVEN_EDITOR_WIDTHS_ACTION_LABEL), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(MaximizeEditorAction, MAXIMIZE_EDITOR_ACTION_ID, MAXIMIZE_EDITOR_ACTION_LABEL), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(MinimizeOtherEditorsAction, MINIMIZE_EDITORS_ACTION_ID, MINIMIZE_EDITORS_ACTION_LABEL), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(MoveEditorLeftAction, MOVE_EDITOR_LEFT_ACTION_ID, MOVE_EDITOR_LEFT_ACTION_LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.LeftArrow) }), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(MoveEditorRightAction, MOVE_EDITOR_RIGHT_ACTION_ID, MOVE_EDITOR_RIGHT_ACTION_LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.RightArrow) }), category);
+}), category, ['cycle', 'opened', 'editors']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(FocusFirstEditorAction, FOCUS_FIRST_EDITOR_ACTION_ID, FOCUS_FIRST_EDITOR_ACTION_LABEL, { primary: KeyMod.CtrlCmd | KeyCode.KEY_1 }), category, ['focus', 'left', 'editor']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(FocusSecondEditorAction, FOCUS_SECOND_EDITOR_ACTION_ID, FOCUS_SECOND_EDITOR_ACTION_LABEL, { primary: KeyMod.CtrlCmd | KeyCode.KEY_2 }), category, ['focus', 'center', 'editor']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(FocusThirdEditorAction, FOCUS_THIRD_EDITOR_ACTION_ID, FOCUS_THIRD_EDITOR_ACTION_LABEL, { primary: KeyMod.CtrlCmd | KeyCode.KEY_3 }), category, ['focus', 'right', 'editor']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(EvenEditorWidthsAction, EVEN_EDITOR_WIDTHS_ACTION_ID, EVEN_EDITOR_WIDTHS_ACTION_LABEL), category, ['even', 'editor', 'widths']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(MaximizeEditorAction, MAXIMIZE_EDITOR_ACTION_ID, MAXIMIZE_EDITOR_ACTION_LABEL), category, ['maximize', 'editor']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(MinimizeOtherEditorsAction, MINIMIZE_EDITORS_ACTION_ID, MINIMIZE_EDITORS_ACTION_LABEL), category, ['minimize', 'other', 'editors']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(MoveEditorLeftAction, MOVE_EDITOR_LEFT_ACTION_ID, MOVE_EDITOR_LEFT_ACTION_LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.LeftArrow) }), category, ['move', 'editor', 'left']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(MoveEditorRightAction, MOVE_EDITOR_RIGHT_ACTION_ID, MOVE_EDITOR_RIGHT_ACTION_LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.RightArrow) }), category, ['move', 'editor', 'right']);
 registry.registerWorkbenchAction(new SyncActionDescriptor(NavigateToLeftEditorAction, NAVIGATE_LEFT_EDITOR_ACTION_ID, NAVIGATE_LEFT_EDITOR_ACTION_LABEL, {
 	primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.LeftArrow,
 	linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyMod.Alt | KeyCode.LeftArrow }
-}), category);
+}), category, ['focus', 'next', 'editor', 'left']);
 registry.registerWorkbenchAction(new SyncActionDescriptor(NavigateToRightEditorAction, NAVIGATE_RIGHT_EDITOR_ACTION_ID, NAVIGATE_RIGHT_EDITOR_ACTION_LABEL, {
 	primary: KeyMod.CtrlCmd | KeyMod.Alt | KeyCode.RightArrow,
 	linux: { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyMod.Alt | KeyCode.RightArrow },
-}), category);
+}), category, ['focus', 'next', 'editor', 'right']);

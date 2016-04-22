@@ -13,6 +13,7 @@ import strings = require('vs/base/common/strings');
 import {IAction} from 'vs/base/common/actions';
 import {IXHRResponse} from 'vs/base/common/http';
 import Severity from 'vs/base/common/severity';
+import { TPromise } from 'vs/base/common/winjs.base';
 
 export interface ErrorListenerCallback {
 	(error: any): void;
@@ -88,6 +89,10 @@ export function onUnexpectedError(e: any): void {
 	}
 }
 
+export function onUnexpectedPromiseError<T>(promise: TPromise<T>): TPromise<T> {
+	return promise.then<T>(null, onUnexpectedError);
+}
+
 export interface IConnectionErrorData {
 	status: number;
 	statusText?: string;
@@ -97,7 +102,7 @@ export interface IConnectionErrorData {
 export function transformErrorForSerialization(error: any): any {
 	if (error instanceof Error) {
 		let {name, message} = error;
-		let stack: string = (<any>error).stacktrace || (<any>error).stack
+		let stack: string = (<any>error).stacktrace || (<any>error).stack;
 		return {
 			$isError: true,
 			name,

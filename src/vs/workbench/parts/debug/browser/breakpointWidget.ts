@@ -7,7 +7,7 @@ import nls = require('vs/nls');
 import 'vs/css!../browser/media/breakpointWidget';
 import async = require('vs/base/common/async');
 import errors = require('vs/base/common/errors');
-import { CommonKeybindings, KeyCode } from 'vs/base/common/keyCodes';
+import { CommonKeybindings, KeyCode, KeyMod } from 'vs/base/common/keyCodes';
 import platform = require('vs/base/common/platform');
 import lifecycle = require('vs/base/common/lifecycle');
 import dom = require('vs/base/browser/dom');
@@ -16,9 +16,11 @@ import { CommonEditorRegistry } from 'vs/editor/common/editorCommonExtensions';
 import editorcommon = require('vs/editor/common/editorCommon');
 import editorbrowser = require('vs/editor/browser/editorBrowser');
 import { ZoneWidget } from 'vs/editor/contrib/zoneWidget/browser/zoneWidget';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IContextViewService } from 'vs/platform/contextview/browser/contextView';
 import { IKeybindingService, IKeybindingContextKey } from 'vs/platform/keybinding/common/keybindingService';
 import debug = require('vs/workbench/parts/debug/common/debug');
+import {IKeyboardEvent} from 'vs/base/browser/keyboardEvent';
 
 const $ = dom.emmet;
 const CONTEXT_BREAKPOINT_WIDGET_VISIBLE = 'breakpointWidgetVisible';
@@ -47,6 +49,15 @@ export class BreakpointWidget extends ZoneWidget {
 		this.toDispose.push(editor.addListener2(editorcommon.EventType.ModelChanged, () => this.dispose()));
 	}
 
+	public static createInstance(editor: editorbrowser.ICodeEditor, lineNumber: number, instantiationService: IInstantiationService): void {
+		if (BreakpointWidget.INSTANCE) {
+			BreakpointWidget.INSTANCE.dispose();
+		}
+
+		instantiationService.createInstance(BreakpointWidget, editor, lineNumber);
+		BreakpointWidget.INSTANCE.show({ lineNumber, column: 1 }, 2);
+	}
+
 	public fillContainer(container: HTMLElement): void {
 		dom.addClass(container, 'breakpoint-widget');
 		const uri = this.editor.getModel().getAssociatedResource();
@@ -54,7 +65,8 @@ export class BreakpointWidget extends ZoneWidget {
 
 		const inputBoxContainer = dom.append(container, $('.inputBoxContainer'));
 		this.inputBox = new InputBox(inputBoxContainer, this.contextViewService, {
-			placeholder: nls.localize('breakpointWidgetPlaceholder', "Breakpoint on line {0} will only stop if this condition is true. 'Enter' to accept, 'esc' to cancel.", this.lineNumber)
+			placeholder: nls.localize('breakpointWidgetPlaceholder', "Breakpoint on line {0} will only stop if this condition is true. 'Enter' to accept, 'esc' to cancel.", this.lineNumber),
+			ariaLabel: nls.localize('breakpointWidgetAriaLabel', "Type the breakpoint condition for line {0}. The program will only stop here if this condition is true. Press Enter to accept or Escape to cancel.")
 		});
 		this.toDispose.push(this.inputBox);
 
@@ -76,21 +88,24 @@ export class BreakpointWidget extends ZoneWidget {
 					};
 
 					// if there is already a breakpoint on this location - remove it.
-					if (this.debugService.getModel().getBreakpoints().some(bp => bp.lineNumber === this.lineNumber && bp.source.uri.toString() === uri.toString())) {
-						this.debugService.toggleBreakpoint(raw).done(null, errors.onUnexpectedError);
+					const oldBreakpoint = this.debugService.getModel().getBreakpoints()
+						.filter(bp => bp.lineNumber === this.lineNumber && bp.source.uri.toString() === uri.toString()).pop();
+					if (oldBreakpoint) {
+						this.debugService.removeBreakpoints(oldBreakpoint.getId()).done(null, errors.onUnexpectedError);
 					}
 
-					this.debugService.toggleBreakpoint(raw).done(null, errors.onUnexpectedError);
+					this.debugService.addBreakpoints([raw]).done(null, errors.onUnexpectedError);
 				}
 
 				this.dispose();
 			}
 		});
 
-		this.toDispose.push(dom.addStandardDisposableListener(this.inputBox.inputElement, 'keydown', (e: dom.IKeyboardEvent) => {
+		this.toDispose.push(dom.addStandardDisposableListener(this.inputBox.inputElement, 'keydown', (e: IKeyboardEvent) => {
 			const isEscape = e.equals(CommonKeybindings.ESCAPE);
 			const isEnter = e.equals(CommonKeybindings.ENTER);
 			if (isEscape || isEnter) {
+				e.stopPropagation();
 				wrapUp(isEnter);
 			}
 		}));
@@ -100,11 +115,12 @@ export class BreakpointWidget extends ZoneWidget {
 		super.dispose();
 		this.breakpointWidgetVisible.reset();
 		BreakpointWidget.INSTANCE = undefined;
-		lifecycle.disposeAll(this.toDispose);
+		lifecycle.dispose(this.toDispose);
+		setTimeout(() => this.editor.focus(), 0);
 	}
 }
 
-CommonEditorRegistry.registerEditorCommand(CLOSE_BREAKPOINT_WIDGET_COMMAND_ID, CommonEditorRegistry.commandWeight(8), { primary: KeyCode.Escape,  }, false, CONTEXT_BREAKPOINT_WIDGET_VISIBLE, (ctx, editor, args) => {
+CommonEditorRegistry.registerEditorCommand(CLOSE_BREAKPOINT_WIDGET_COMMAND_ID, CommonEditorRegistry.commandWeight(8), { primary: KeyCode.Escape, secondary: [KeyMod.Shift | KeyCode.Escape]  }, false, CONTEXT_BREAKPOINT_WIDGET_VISIBLE, (ctx, editor, args) => {
 	if (BreakpointWidget.INSTANCE) {
 		BreakpointWidget.INSTANCE.dispose();
 	}

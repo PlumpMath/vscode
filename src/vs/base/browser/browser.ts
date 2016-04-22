@@ -21,20 +21,12 @@ interface INavigator {
 	userAgent: string;
 }
 
-interface ILocation {
-	search: string;
-}
-
 interface IGlobalScope {
-	window: ISafeWindow;
 	navigator: INavigator;
-	parent: IGlobalScope;
 	document: ISafeDocument;
 	history: {
 		pushState: any
 	};
-	isTest: boolean;
-	location: ILocation;
 }
 
 const globals = <IGlobalScope><any>(typeof self === 'object' ? self : global);
@@ -54,7 +46,6 @@ const globals = <IGlobalScope><any>(typeof self === 'object' ? self : global);
 // firefox: "Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:34.0) Gecko/20100101 Firefox/34.0"
 
 const userAgent = globals.navigator ? globals.navigator.userAgent : '';
-const isTest = !!globals.isTest;
 
 // DOCUMENTED FOR FUTURE REFERENCE:
 // When running IE11 in IE10 document mode, the code below will identify the browser as being IE10,
@@ -84,7 +75,7 @@ let _disablePushState = false;
  */
 export function canPushState() {
 	return (!_disablePushState && globals.history && globals.history.pushState);
-};
+}
 
 /**
  * Helpful when we detect that pushing state does not work for some reason (e.g. FF prevents pushState for security reasons in some cases)
@@ -123,42 +114,6 @@ export function hasCSSAnimationSupport() {
 	}
 
 	return this._hasCSSAnimationSupport;
-}
-
-/**
- * Returns if the browser supports the provided video mime type or not.
- */
-export function canPlayVideo(type: string) {
-	if (!globals.document) {
-		return false;
-	}
-
-	let video: HTMLVideoElement = <HTMLVideoElement>globals.document.createElement('video');
-	if (video.canPlayType) {
-		let canPlay = video.canPlayType(type);
-
-		return canPlay === 'maybe' || canPlay === 'probably';
-	}
-
-	return false;
-}
-
-/**
- * Returns if the browser supports the provided audio mime type or not.
- */
-export function canPlayAudio(type: string) {
-	if (!globals.document) {
-		return false;
-	}
-
-	let audio: HTMLAudioElement = <HTMLAudioElement>globals.document.createElement('audio');
-	if (audio.canPlayType) {
-		let canPlay = audio.canPlayType(type);
-
-		return canPlay === 'maybe' || canPlay === 'probably';
-	}
-
-	return false;
 }
 
 export function isInWebWorker(): boolean {

@@ -18,28 +18,26 @@ import errors = require('vs/base/common/errors');
 import {CONTEXT as ToolBarContext, ToolBar} from 'vs/base/browser/ui/toolbar/toolbar';
 import {IActionItem, ActionsOrientation} from 'vs/base/browser/ui/actionbar/actionbar';
 import {ProgressBar} from 'vs/base/browser/ui/progressbar/progressbar';
-import {Scope, IActionBarRegistry, Extensions, prepareActions} from 'vs/workbench/browser/actionBarRegistry';
+import {IActionBarRegistry, Extensions, prepareActions} from 'vs/workbench/browser/actionBarRegistry';
 import {Action, IAction} from 'vs/base/common/actions';
 import {Part} from 'vs/workbench/browser/part';
-import {Composite, CompositeDescriptor, CompositeRegistry} from 'vs/workbench/browser/composite';
+import {Composite, CompositeRegistry} from 'vs/workbench/browser/composite';
 import {IComposite} from 'vs/workbench/common/composite';
 import {EventType as WorkbenchEventType, CompositeEvent} from 'vs/workbench/common/events';
 import {EventType as CompositeEventType} from 'vs/workbench/browser/composite';
-import {SyncActionDescriptor} from 'vs/platform/actions/common/actions';
 import {WorkbenchProgressService} from 'vs/workbench/services/progress/browser/progressService';
 import {IPartService} from 'vs/workbench/services/part/common/partService';
 import {IStorageService, StorageScope} from 'vs/platform/storage/common/storage';
 import {IContextMenuService} from 'vs/platform/contextview/browser/contextView';
 import {IEventService} from 'vs/platform/event/common/event';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
+import {ServiceCollection} from 'vs/platform/instantiation/common/serviceCollection';
 import {IMessageService, Severity} from 'vs/platform/message/common/message';
 import {IProgressService} from 'vs/platform/progress/common/progress';
 import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
 import {IKeybindingService} from 'vs/platform/keybinding/common/keybindingService';
 
 export abstract class CompositePart<T extends Composite> extends Part {
-
-	protected instantiationService: IInstantiationService;
 	private activeCompositeListeners: { (): void; }[];
 	private instantiatedCompositeListeners: { (): void; }[];
 	private mapCompositeToCompositeContainer: { [compositeId: string]: Builder; };
@@ -64,6 +62,7 @@ export abstract class CompositePart<T extends Composite> extends Part {
 		private contextMenuService: IContextMenuService,
 		protected partService: IPartService,
 		private keybindingService: IKeybindingService,
+		protected instantiationService: IInstantiationService,
 		private registry: CompositeRegistry<T>,
 		private activeCompositeSettingsKey: string,
 		private nameForTelemetry: string,
@@ -81,10 +80,6 @@ export abstract class CompositePart<T extends Composite> extends Part {
 		this.activeComposite = null;
 		this.instantiatedComposits = [];
 		this.compositeLoaderPromises = {};
-	}
-
-	public setInstantiationService(service: IInstantiationService): void {
-		this.instantiationService = service;
 	}
 
 	protected openComposite(id: string, focus?: boolean): TPromise<Composite> {
@@ -177,10 +172,7 @@ export abstract class CompositePart<T extends Composite> extends Part {
 			let loaderPromise = this.compositeLoaderPromises[id];
 			if (!loaderPromise) {
 				let progressService = new WorkbenchProgressService(this.eventService, this.progressBar, compositeDescriptor.id, isActive);
-				let services = {
-					progressService: progressService
-				};
-				let compositeInstantiationService = this.instantiationService.createChild(services);
+				let compositeInstantiationService = this.instantiationService.createChild(new ServiceCollection([IProgressService, progressService]));
 
 				loaderPromise = compositeInstantiationService.createInstance(compositeDescriptor).then((composite: Composite) => {
 					this.mapProgressServiceToComposite[composite.getId()] = progressService;
@@ -359,7 +351,7 @@ export abstract class CompositePart<T extends Composite> extends Part {
 		this.titleLabel.safeInnerHtml(compositeTitle);
 		this.titleLabel.title(keybinding ? nls.localize('compositeTitleTooltip', "{0} ({1})", compositeTitle, keybinding) : compositeTitle);
 
-		this.toolBar.setAriaLabel(nls.localize('ariaCompositeToolbarLabel',"{0} actions", compositeTitle));
+		this.toolBar.setAriaLabel(nls.localize('ariaCompositeToolbarLabel', "{0} actions", compositeTitle));
 	}
 
 	private collectCompositeActions(composite: Composite): () => void {
@@ -429,6 +421,13 @@ export abstract class CompositePart<T extends Composite> extends Part {
 			'class': ['composite', 'title']
 		});
 
+		// Left Title Label
+		$(titleArea).div({
+			'class': 'title-label'
+		}, (div) => {
+			this.titleLabel = div.span();
+		});
+
 		// Right Actions Container
 		$(titleArea).div({
 			'class': 'title-actions'
@@ -439,13 +438,6 @@ export abstract class CompositePart<T extends Composite> extends Part {
 				actionItemProvider: (action: Action) => this.actionItemProvider(action),
 				orientation: ActionsOrientation.HORIZONTAL
 			});
-		});
-
-		// Left Title Label
-		$(titleArea).div({
-			'class': 'title-label'
-		}, (div) => {
-			this.titleLabel = div.span();
 		});
 
 		return titleArea;

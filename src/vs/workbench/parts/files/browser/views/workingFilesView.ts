@@ -13,12 +13,12 @@ import {IAction, IActionRunner} from 'vs/base/common/actions';
 import workbenchEditorCommon = require('vs/workbench/common/editor');
 import {CollapsibleState} from 'vs/base/browser/ui/splitview/splitview';
 import {IWorkingFileEntry, IWorkingFilesModel, IWorkingFileModelChangeEvent, LocalFileChangeEvent, EventType as FileEventType, IFilesConfiguration, ITextFileService, AutoSaveMode} from 'vs/workbench/parts/files/common/files';
-import dom = require('vs/base/browser/dom');
+import * as DOM from 'vs/base/browser/dom';
 import {IDisposable} from 'vs/base/common/lifecycle';
 import errors = require('vs/base/common/errors');
 import {EventType as WorkbenchEventType, UntitledEditorEvent, EditorEvent} from 'vs/workbench/common/events';
 import {AdaptiveCollapsibleViewletView} from 'vs/workbench/browser/viewlet';
-import {CloseWorkingFileAction, SaveAllAction} from 'vs/workbench/parts/files/browser/fileActions';
+import {CloseAllWorkingFilesAction, SaveAllAction} from 'vs/workbench/parts/files/browser/fileActions';
 import {WorkingFileEntry} from 'vs/workbench/parts/files/common/workingFilesModel';
 import {WorkingFilesDragAndDrop, WorkingFilesSorter, WorkingFilesController, WorkingFilesDataSource, WorkingFilesRenderer, WorkingFilesAccessibilityProvider, WorkingFilesActionProvider} from 'vs/workbench/parts/files/browser/views/workingFilesViewer';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
@@ -64,25 +64,25 @@ export class WorkingFilesView extends AdaptiveCollapsibleViewletView {
 	}
 
 	public renderHeader(container: HTMLElement): void {
-		super.renderHeader(container);
-
 		let titleDiv = $('div.title').appendTo(container);
 		$('span').text(nls.localize('workingFiles', "Working Files")).appendTo(titleDiv);
 
 		this.dirtyCountElement = $('div.monaco-count-badge').appendTo(titleDiv).hide().getHTMLElement();
 		this.updateDirtyIndicator();
+
+		super.renderHeader(container);
 	}
 
 	public getActions(): IAction[] {
 		return [
 			this.instantiationService.createInstance(SaveAllAction, SaveAllAction.ID, SaveAllAction.LABEL),
-			this.instantiationService.createInstance(CloseWorkingFileAction, this.model, null)
+			this.instantiationService.createInstance(CloseAllWorkingFilesAction, this.model)
 		];
 	}
 
 	public renderBody(container: HTMLElement): void {
 		this.treeContainer = super.renderViewTree(container);
-		dom.addClass(this.treeContainer, 'explorer-working-files');
+		DOM.addClass(this.treeContainer, 'explorer-working-files');
 
 		this.createViewer($(this.treeContainer));
 	}
@@ -90,19 +90,16 @@ export class WorkingFilesView extends AdaptiveCollapsibleViewletView {
 	public create(): TPromise<void> {
 
 		// Load Config
-		return this.configurationService.loadConfiguration().then((configuration) => {
+		const configuration = this.configurationService.getConfiguration<IFilesConfiguration>();
+		this.onConfigurationUpdated(configuration);
 
-			// Update configuration
-			this.onConfigurationUpdated(configuration);
+		// listeners
+		this.registerListeners();
 
-			// listeners
-			this.registerListeners();
+		// highlight active input
+		this.highlightInput(this.editorService.getActiveEditorInput());
 
-			// highlight active input
-			this.highlightInput(this.editorService.getActiveEditorInput());
-
-			return super.create();
-		});
+		return super.create();
 	}
 
 	private onConfigurationUpdated(configuration: IFilesConfiguration): void {
@@ -296,14 +293,20 @@ export class WorkingFilesView extends AdaptiveCollapsibleViewletView {
 			dnd: dnd,
 			accessibilityProvider: accessibility
 		}, {
-			indentPixels: 0,
-			twistiePixels: 8,
-			ariaLabel: nls.localize('treeAriaLabel', "Working Files")
-		});
+				indentPixels: 0,
+				twistiePixels: 8,
+				ariaLabel: nls.localize('treeAriaLabel', "Working Files")
+			});
 
 		this.tree.setInput(this.model);
 
 		return this.tree;
+	}
+
+	public getOptimalWidth():number {
+		let parentNode = this.tree.getHTMLElement();
+		let childNodes = [].slice.call(parentNode.querySelectorAll('.monaco-file-label > .file-name'));
+		return DOM.getLargestChildWidth(parentNode, childNodes);
 	}
 
 	public shutdown(): void {

@@ -6,13 +6,17 @@
 import nls = require('vs/nls');
 import { Promise, TPromise } from 'vs/base/common/winjs.base';
 import { Action } from 'vs/base/common/actions';
+import { assign } from 'vs/base/common/objects';
 import Severity from 'vs/base/common/severity';
 import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IMessageService } from 'vs/platform/message/common/message';
 import { ReloadWindowAction } from 'vs/workbench/electron-browser/actions';
 import { IExtensionsService, IExtension } from 'vs/workbench/parts/extensions/common/extensions';
+import { extensionEquals, getTelemetryData } from 'vs/workbench/parts/extensions/common/extensionsUtil';
 import { IQuickOpenService } from 'vs/workbench/services/quickopen/common/quickOpenService';
+
+const CloseAction = new Action('action.close', nls.localize('close', "Close"));
 
 export class ListExtensionsAction extends Action {
 
@@ -83,6 +87,29 @@ export class ListOutdatedExtensionsAction extends Action {
 	}
 }
 
+export class ListSuggestedExtensionsAction extends Action {
+
+	static ID = 'workbench.extensions.action.listSuggestedExtensions';
+	static LABEL = nls.localize('showExtensionRecommendations', "Show Extension Recommendations");
+
+	constructor(
+		id: string,
+		label: string,
+		@IExtensionsService private extensionsService: IExtensionsService,
+		@IQuickOpenService private quickOpenService: IQuickOpenService
+	) {
+		super(id, label, null, true);
+	}
+
+	public run(): Promise {
+		return this.quickOpenService.show('ext recommend ');
+	}
+
+	protected isEnabled(): boolean {
+		return true;
+	}
+}
+
 export class InstallAction extends Action {
 
 	constructor(
@@ -99,38 +126,38 @@ export class InstallAction extends Action {
 	public run(extension: IExtension): TPromise<any> {
 		this.enabled = false;
 
-		return this.extensionsService
-			.install(extension)
-			.then(() => this.onSuccess(extension), err => this.onError(err, extension))
-			.then(() => this.enabled = true)
-			.then(() => null);
+		return this.extensionsService.getInstalled()
+			.then(installed => installed.some(e => extensionEquals(e, extension)))
+			.then(isUpdate => {
+				return this.extensionsService
+					.install(extension)
+					.then(() => this.onSuccess(extension, isUpdate), err => this.onError(err, extension, isUpdate))
+					.then(() => this.enabled = true)
+					.then(() => null);
+			});
 	}
 
-	private onSuccess(extension: IExtension) {
-		this.reportTelemetry(extension, true);
-		this.messageService.show(
-			Severity.Info,
-			{
-				message: nls.localize('success', "{0} {1} was successfully installed. Restart to enable it.", extension.displayName, extension.version),
-				actions: [this.instantiationService.createInstance(ReloadWindowAction, ReloadWindowAction.ID, nls.localize('restartNow', "Restart Now"))]
-			}
-		);
+	private onSuccess(extension: IExtension, isUpdate: boolean) {
+		this.reportTelemetry(extension, isUpdate, true);
+		this.messageService.show(Severity.Info, {
+			message: nls.localize('success-installed', "'{0}' was successfully installed. Restart to enable it.", extension.displayName),
+			actions: [
+				CloseAction,
+				this.instantiationService.createInstance(ReloadWindowAction, ReloadWindowAction.ID, nls.localize('restartNow', "Restart Now"))
+			]
+		});
 	}
 
-	private onError(err: Error, extension: IExtension) {
-		this.reportTelemetry(extension, false);
+	private onError(err: Error, extension: IExtension, isUpdate: boolean) {
+		this.reportTelemetry(extension, isUpdate, false);
 		this.messageService.show(Severity.Error, err);
 	}
 
-	private reportTelemetry(extension: IExtension, success: boolean) {
-		this.telemetryService.publicLog('extensionGallery:install', {
-			success,
-			id: extension.galleryInformation ? extension.galleryInformation.id : null,
-			name: extension.name,
-			publisherId: extension.galleryInformation ? extension.galleryInformation.publisherId : null,
-			publisherName: extension.publisher,
-			publisherDisplayName: extension.galleryInformation ? extension.galleryInformation.publisherDisplayName : null
-		});
+	private reportTelemetry(extension: IExtension, isUpdate: boolean, success: boolean) {
+		const event = isUpdate ? 'extensionGallery:update' : 'extensionGallery:install';
+		const data = assign(getTelemetryData(extension), { success });
+
+		this.telemetryService.publicLog(event, data);
 	}
 }
 
@@ -147,27 +174,35 @@ export class UninstallAction extends Action {
 	}
 
 	public run(extension: IExtension): TPromise<any> {
-		if (!window.confirm(nls.localize('deleteSure', "Are you sure you want to uninstall the '{0}' extension?", extension.displayName))) {
+		if (!window.confirm(nls.localize('deleteSure', "Are you sure you want to uninstall '{0}'?", extension.displayName))) {
 			return TPromise.as(null);
 		}
 
 		this.enabled = false;
 
-		return this.extensionsService.uninstall(extension)
-			.then(() => this.onSuccess(extension), err => this.onError(err, extension))
-			.then(() => this.enabled = true)
-			.then(() => null);
+		return this.extensionsService.getInstalled().then(localExtensions => {
+			const [local] = localExtensions.filter(local => extensionEquals(local, extension));
+
+			if (!local) {
+				return TPromise.wrapError(nls.localize('notFound', "Extension '{0}' not installed.", extension.displayName));
+			}
+
+			return this.extensionsService.uninstall(local)
+				.then(() => this.onSuccess(local), err => this.onError(err, local))
+				.then(() => this.enabled = true)
+				.then(() => null);
+		});
 	}
 
 	private onSuccess(extension: IExtension) {
 		this.reportTelemetry(extension, true);
-		this.messageService.show(
-			Severity.Info,
-			{
-				message: nls.localize('success', "{0} was successfully uninstalled. Restart to deactivate it.", extension.displayName),
-				actions: [this.instantiationService.createInstance(ReloadWindowAction, ReloadWindowAction.ID, nls.localize('restartNow2', "Restart Now"))]
-			}
-		);
+		this.messageService.show(Severity.Info, {
+			message: nls.localize('success-uninstalled', "'{0}' was successfully uninstalled. Restart to deactivate it.", extension.displayName),
+			actions: [
+				CloseAction,
+				this.instantiationService.createInstance(ReloadWindowAction, ReloadWindowAction.ID, nls.localize('restartNow2', "Restart Now"))
+			]
+		});
 	}
 
 	private onError(err: Error, extension: IExtension) {
@@ -176,13 +211,8 @@ export class UninstallAction extends Action {
 	}
 
 	private reportTelemetry(extension: IExtension, success: boolean) {
-		this.telemetryService.publicLog('extensionGallery:uninstall', {
-			success,
-			id: extension.galleryInformation ? extension.galleryInformation.id : null,
-			name: extension.name,
-			publisherId: extension.galleryInformation ? extension.galleryInformation.publisherId : null,
-			publisherName: extension.publisher,
-			publisherDisplayName: extension.galleryInformation ? extension.galleryInformation.publisherDisplayName : null
-		});
+		const data = assign(getTelemetryData(extension), { success });
+
+		this.telemetryService.publicLog('extensionGallery:uninstall', data);
 	}
 }

@@ -6,7 +6,6 @@
 'use strict';
 
 import path = require('path');
-import os = require('os');
 
 import {shell, screen, BrowserWindow} from 'electron';
 
@@ -26,7 +25,7 @@ export interface IWindowState {
 
 export interface IWindowCreationOptions {
 	state: IWindowState;
-	isPluginDevelopmentHost: boolean;
+	extensionDevelopmentPath?: string;
 }
 
 export enum WindowMode {
@@ -35,7 +34,7 @@ export enum WindowMode {
 	Minimized
 }
 
-export const defaultWindowState = function(mode = WindowMode.Normal): IWindowState {
+export const defaultWindowState = function (mode = WindowMode.Normal): IWindowState {
 	return {
 		width: 1024,
 		height: 768,
@@ -91,47 +90,52 @@ export interface IWindowConfiguration extends env.ICommandLineArguments {
 	execPath: string;
 	version: string;
 	appName: string;
+	applicationName: string;
+	darwinBundleIdentifier: string;
 	appSettingsHome: string;
 	appSettingsPath: string;
 	appKeybindingsPath: string;
-	userPluginsHome: string;
+	userExtensionsHome: string;
+	mainIPCHandle: string;
 	sharedIPCHandle: string;
 	appRoot: string;
 	isBuilt: boolean;
 	commitHash: string;
 	updateFeedUrl: string;
 	updateChannel: string;
-	recentPaths: string[];
+	recentFiles: string[];
+	recentFolders: string[];
 	workspacePath?: string;
 	filesToOpen?: IPath[];
 	filesToCreate?: IPath[];
+	filesToDiff?: IPath[];
 	extensionsToInstall: string[];
 	crashReporter: Electron.CrashReporterStartOptions;
 	extensionsGallery: {
 		serviceUrl: string;
 		itemUrl: string;
 	};
+	extensionTips: { [id: string]: string; };
 	welcomePage: string;
 	releaseNotesUrl: string;
+	licenseUrl: string;
 	productDownloadUrl: string;
 	enableTelemetry: boolean;
-	userEnv: env.IProcessEnvironment,
+	userEnv: env.IProcessEnvironment;
 	aiConfig: {
 		key: string;
 		asimovKey: string;
-	},
+	};
 	sendASmile: {
 		reportIssueUrl: string,
 		requestFeatureUrl: string
-	}
+	};
 }
-
-const enableDebugLogging = false;
 
 export class VSCodeWindow {
 
 	public static menuBarHiddenKey = 'menuBarHidden';
-	public static themeStorageKey = 'theme'; // TODO@Ben this key is only used to find out if a window can be shown instantly because of light theme, remove once we have support for bg color
+	public static themeStorageKey = 'theme';
 
 	private static MIN_WIDTH = 200;
 	private static MIN_HEIGHT = 120;
@@ -141,7 +145,7 @@ export class VSCodeWindow {
 	private _win: Electron.BrowserWindow;
 	private _lastFocusTime: number;
 	private _readyState: ReadyState;
-	private _isPluginDevelopmentHost: boolean;
+	private _extensionDevelopmentPath: string;
 	private windowState: IWindowState;
 	private currentWindowMode: WindowMode;
 
@@ -153,7 +157,7 @@ export class VSCodeWindow {
 	constructor(config: IWindowCreationOptions) {
 		this._lastFocusTime = -1;
 		this._readyState = ReadyState.NONE;
-		this._isPluginDevelopmentHost = config.isPluginDevelopmentHost;
+		this._extensionDevelopmentPath = config.extensionDevelopmentPath;
 		this.whenReadyCallbacks = [];
 
 		// Load window state
@@ -161,7 +165,7 @@ export class VSCodeWindow {
 
 		// For VS theme we can show directly because background is white
 		const usesLightTheme = /vs($| )/.test(storage.getItem<string>(VSCodeWindow.themeStorageKey));
-		let showDirectly = usesLightTheme;
+		let showDirectly = true; // set to false to prevent background color flash (flash should be fixed for Electron >= 0.37.x)
 		if (showDirectly && !global.windowShow) {
 			global.windowShow = new Date().getTime();
 		}
@@ -171,16 +175,18 @@ export class VSCodeWindow {
 			height: this.windowState.height,
 			x: this.windowState.x,
 			y: this.windowState.y,
-			backgroundColor: usesLightTheme ? '#FFFFFF' : '#1E1E1E',
+			backgroundColor: usesLightTheme ? '#FFFFFF' : platform.isMacintosh ? '#131313' : '#1E1E1E', // https://github.com/electron/electron/issues/5150
 			minWidth: VSCodeWindow.MIN_WIDTH,
 			minHeight: VSCodeWindow.MIN_HEIGHT,
 			show: showDirectly && this.currentWindowMode !== WindowMode.Maximized, // in case we are maximized, only show later after the call to maximize (see below)
-			title: env.product.nameLong
+			title: env.product.nameLong,
+			webPreferences: {
+				'backgroundThrottling': false // by default if Code is in the background, intervals and timeouts get throttled
+			}
 		};
 
 		if (platform.isLinux) {
-			// Windows and Mac are better off using the embedded icon(s)
-			options.icon = path.join(env.appRoot, 'resources/linux/code.png');
+			options.icon = path.join(env.appRoot, 'resources/linux/code.png'); // Windows and Mac are better off using the embedded icon(s)
 		}
 
 		// Create the browser window.
@@ -207,7 +213,11 @@ export class VSCodeWindow {
 	}
 
 	public get isPluginDevelopmentHost(): boolean {
-		return this._isPluginDevelopmentHost;
+		return !!this._extensionDevelopmentPath;
+	}
+
+	public get extensionDevelopmentPath(): string {
+		return this._extensionDevelopmentPath;
 	}
 
 	public get config(): IWindowConfiguration {
@@ -227,20 +237,11 @@ export class VSCodeWindow {
 			return;
 		}
 
-		// Windows 10: https://github.com/Microsoft/vscode/issues/929
-		if (platform.isWindows && os.release() && os.release().indexOf('10.') === 0 && !this._win.isFocused()) {
-			this._win.minimize();
-			this._win.focus();
+		if (this._win.isMinimized()) {
+			this._win.restore();
 		}
 
-		// Mac / Linux / Windows 7 & 8
-		else {
-			if (this._win.isMinimized()) {
-				this._win.restore();
-			}
-
-			this._win.focus();
-		}
+		this._win.focus();
 	}
 
 	public get lastFocusTime(): number {
@@ -289,7 +290,7 @@ export class VSCodeWindow {
 			if (this.pendingLoadConfig) {
 				this.currentConfig = this.pendingLoadConfig;
 
-				delete this.pendingLoadConfig;
+				this.pendingLoadConfig = null;
 			}
 
 			// To prevent flashing, we set the window visible after the page has finished to load but before VSCode is loaded
@@ -388,16 +389,17 @@ export class VSCodeWindow {
 		let configuration: IWindowConfiguration = objects.mixin({}, this.currentConfig);
 		delete configuration.filesToOpen;
 		delete configuration.filesToCreate;
+		delete configuration.filesToDiff;
 		delete configuration.extensionsToInstall;
 
 		// Some configuration things get inherited if the window is being reloaded and we are
 		// in plugin development mode. These options are all development related.
 		if (this.isPluginDevelopmentHost && cli) {
 			configuration.verboseLogging = cli.verboseLogging;
-			configuration.logPluginHostCommunication = cli.logPluginHostCommunication;
-			configuration.debugPluginHostPort = cli.debugPluginHostPort;
-			configuration.debugBrkPluginHost = cli.debugBrkPluginHost;
-			configuration.pluginHomePath = cli.pluginHomePath;
+			configuration.logExtensionHostCommunication = cli.logExtensionHostCommunication;
+			configuration.debugExtensionHostPort = cli.debugExtensionHostPort;
+			configuration.debugBrkExtensionHost = cli.debugBrkExtensionHost;
+			configuration.extensionsHomePath = cli.extensionsHomePath;
 		}
 
 		// Load config

@@ -7,36 +7,36 @@
 import assert = require('assert');
 import Parser = require('../jsonParser');
 import SchemaService = require('../jsonSchemaService');
-import JsonSchema = require('../json-toolbox/jsonSchema');
+import JsonSchema = require('../jsonSchema');
 import {JSONCompletion} from '../jsonCompletion';
-import {IXHROptions, IXHRResponse} from '../utils/httpRequest';
+import {XHROptions, XHRResponse} from 'request-light';
 
 import {CompletionItem, CompletionItemKind, CompletionOptions, ITextDocument, TextDocumentIdentifier, TextDocumentPosition, Range, Position, TextEdit} from 'vscode-languageserver';
 import {applyEdits} from './textEditSupport';
 
 suite('JSON Completion', () => {
 
-	var requestService = function(options: IXHROptions): Promise<IXHRResponse> {
-		return Promise.reject<IXHRResponse>({ responseText: '', status: 404 });
+	var requestService = function(options: XHROptions): Promise<XHRResponse> {
+		return Promise.reject<XHRResponse>({ responseText: '', status: 404 });
 	}
 
 	var assertSuggestion = function(completions: CompletionItem[], label: string, documentation?: string, document?: ITextDocument, resultText?: string) {
 		var matches = completions.filter(function(completion: CompletionItem) {
 			return completion.label === label && (!documentation || completion.documentation === documentation);
 		});
-		assert.equal(matches.length, 1, label + " should only existing once");
+		assert.equal(matches.length, 1, label + " should only existing once: Actual: " + completions.map(c => c.label).join(', '));
 		if (document && resultText) {
 			assert.equal(applyEdits(document, [ matches[0].textEdit ]), resultText);
 		}
 	};
-	
+
 
 	var testSuggestionsFor = function(value: string, stringAfter: string, schema: JsonSchema.IJSONSchema, test: (items: CompletionItem[], document: ITextDocument) => void) : Thenable<void> {
 		var uri = 'test://test.json';
 		var idx = stringAfter ? value.indexOf(stringAfter) : 0;
 
 		var schemaService = new SchemaService.JSONSchemaService(requestService);
-		var completionProvider = new JSONCompletion(schemaService);
+		var completionProvider = new JSONCompletion(schemaService, console);
 		if (schema) {
 			var id = "http://myschemastore/test1";
 			schemaService.registerExternalSchema(id, ["*.json"], schema);
@@ -50,8 +50,6 @@ suite('JSON Completion', () => {
 			return null;
 		})
 	};
-
-
 
 	test('Complete keys no schema', function(testDone) {
 		Promise.all([
@@ -187,6 +185,34 @@ suite('JSON Completion', () => {
 			testSuggestionsFor('{ "a": "John"/**/ }', '/**/', schema, result => {
 				assert.strictEqual(result.length, 3);
 				assertSuggestion(result, '"John"');
+			})
+		]).then(() => testDone(), (error) => testDone(error));
+	});
+
+	test('Complete value with schema: booleans, null', function(testDone) {
+
+		var schema: JsonSchema.IJSONSchema = {
+			type: 'object',
+			properties: {
+				'a': {
+					type: 'boolean'
+				},
+				'b': {
+					type: ['boolean', 'null']
+				},
+			}
+		};
+		Promise.all([
+			testSuggestionsFor('{ "a": /**/ }', '/**/', schema, result => {
+				assert.strictEqual(result.length, 2);
+				assertSuggestion(result, 'true');
+				assertSuggestion(result, 'false');
+			}),
+			testSuggestionsFor('{ "b": "/**/ }', '/**/', schema, result => {
+				assert.strictEqual(result.length, 3);
+				assertSuggestion(result, 'true');
+				assertSuggestion(result, 'false');
+				assertSuggestion(result, 'null');
 			})
 		]).then(() => testDone(), (error) => testDone(error));
 	});
@@ -450,4 +476,44 @@ suite('JSON Completion', () => {
 			}),
 		]).then(() => testDone(), (error) => testDone(error));
 	});
+
+	test('Escaping no schema', function(testDone) {
+		Promise.all([
+			testSuggestionsFor('[ { "\\\\{{}}": "John" }, { "/**/" }', '/**/', null, result => {
+				assertSuggestion(result, '\\{{}}');
+			}),
+			testSuggestionsFor('[ { "\\\\{{}}": "John" }, { /**/ }', '/**/', null, (result, document) => {
+				assertSuggestion(result, '\\{{}}', null, document, '[ { "\\\\{{}}": "John" }, { "\\\\\\\\\\{\\{\\}\\}"/**/ }');
+			}),
+			testSuggestionsFor('[ { "name": "\\{" }, { "name": /**/ }', '/**/', null, result => {
+				assertSuggestion(result, '"\\{"');
+			})
+		]).then(() => testDone(), (error) => testDone(error));
+	});
+
+	test('Escaping with schema', function(testDone) {
+		var schema: JsonSchema.IJSONSchema = {
+			type: 'object',
+			properties: {
+				'{\\}': {
+					default: "{\\}",
+					defaultSnippets: [ { body: "{{var}}"} ],
+					enum: ['John{\\}']
+				}
+			}
+		};
+
+		Promise.all([
+			testSuggestionsFor('{ /**/ }', '/**/', schema, (result, document) => {
+				assertSuggestion(result, '{\\}', null, document, '{ "\\{\\\\\\\\\\}": "{{\\{\\\\\\\\\\}}}"/**/ }');
+			}),
+			testSuggestionsFor('{ "{\\\\}": /**/ }', '/**/', schema, (result, document) => {
+				assertSuggestion(result, '"{\\\\}"', null, document, '{ "{\\\\}": "\\{\\\\\\\\\\}"/**/ }');
+				assertSuggestion(result, '"John{\\\\}"', null, document, '{ "{\\\\}": "John\\{\\\\\\\\\\}"/**/ }');
+				assertSuggestion(result, '"var"', null, document, '{ "{\\\\}": "{{var}}"/**/ }');
+			})
+		]).then(() => testDone(), (error) => testDone(error));
+	});
+
 });
+

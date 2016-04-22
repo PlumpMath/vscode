@@ -89,10 +89,10 @@ export class TestThreadService extends NullThreadService {
 					});
 				});
 			}
-		}, id, descriptor)
+		}, id, descriptor);
 	}
 
-	protected _registerAndInstantiatePluginHostActor<T>(id: string, descriptor: SyncDescriptor0<T>): T {
+	protected _registerAndInstantiateExtHostActor<T>(id: string, descriptor: SyncDescriptor0<T>): T {
 		return this._getOrCreateLocalInstance(id, descriptor);
 	}
 }

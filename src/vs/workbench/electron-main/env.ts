@@ -25,20 +25,21 @@ export interface IUpdateInfo {
 export interface IProductConfiguration {
 	nameShort: string;
 	nameLong: string;
+	applicationName: string;
 	win32AppUserModelId: string;
 	win32MutexName: string;
+	darwinBundleIdentifier: string;
 	dataFolderName: string;
 	downloadUrl: string;
 	updateUrl?: string;
 	quality?: string;
 	commit: string;
 	date: string;
-	expiryDate: number;
-	expiryUrl: string;
 	extensionsGallery: {
 		serviceUrl: string;
 		itemUrl: string;
 	};
+	extensionTips: { [id: string]: string; };
 	crashReporter: Electron.CrashReporterStartOptions;
 	welcomePage: string;
 	enableTelemetry: boolean;
@@ -62,6 +63,8 @@ export interface IProductConfiguration {
 export const isBuilt = !process.env.VSCODE_DEV;
 
 export const appRoot = path.dirname(uri.parse(require.toUrl('')).fsPath);
+
+export const currentWorkingDirectory = process.env.VSCODE_CWD || process.cwd();
 
 let productContents: IProductConfiguration;
 try {
@@ -97,17 +100,17 @@ if (!fs.existsSync(userHome)) {
 	fs.mkdirSync(userHome);
 }
 
-export const userPluginsHome = cliArgs.pluginHomePath || path.join(userHome, 'extensions');
-if (!fs.existsSync(userPluginsHome)) {
-	fs.mkdirSync(userPluginsHome);
+export const userExtensionsHome = cliArgs.extensionsHomePath || path.join(userHome, 'extensions');
+if (!fs.existsSync(userExtensionsHome)) {
+	fs.mkdirSync(userExtensionsHome);
 }
 
-// Helper to identify if we have plugin tests to run from the command line without debugger
-export const isTestingFromCli = cliArgs.pluginTestsPath && !cliArgs.debugBrkPluginHost;
+// Helper to identify if we have extension tests to run from the command line without debugger
+export const isTestingFromCli = cliArgs.extensionTestsPath && !cliArgs.debugBrkExtensionHost;
 
 export function log(...a: any[]): void {
 	if (cliArgs.verboseLogging) {
-		console.log.apply(null, a);
+		console.log.call(null, `(${new Date().toLocaleTimeString()})`, ...a);
 	}
 }
 
@@ -117,20 +120,18 @@ export interface IProcessEnvironment {
 
 export interface ICommandLineArguments {
 	verboseLogging: boolean;
-	debugPluginHostPort: number;
-	debugBrkPluginHost: boolean;
-	logPluginHostCommunication: boolean;
-	disablePlugins: boolean;
+	debugExtensionHostPort: number;
+	debugBrkExtensionHost: boolean;
+	logExtensionHostCommunication: boolean;
+	disableExtensions: boolean;
 
-	pluginHomePath: string;
-	pluginDevelopmentPath: string;
-	pluginTestsPath: string;
+	extensionsHomePath: string;
+	extensionDevelopmentPath: string;
+	extensionTestsPath: string;
 
 	programStart: number;
 
 	pathArguments?: string[];
-
-	workers?: number;
 
 	enablePerformance?: boolean;
 
@@ -140,8 +141,11 @@ export interface ICommandLineArguments {
 	openInSameWindow?: boolean;
 
 	gotoLineMode?: boolean;
+	diffMode?: boolean;
 
 	locale?: string;
+
+	waitForWindowClose?: boolean;
 }
 
 function parseCli(): ICommandLineArguments {
@@ -176,34 +180,37 @@ function parseCli(): ICommandLineArguments {
 
 	let gotoLineMode = !!opts['g'] || !!opts['goto'];
 
-	let debugBrkPluginHostPort = parseNumber(args, '--debugBrkPluginHost', 5870);
-	let debugPluginHostPort: number;
-	let debugBrkPluginHost: boolean;
-	if (debugBrkPluginHostPort) {
-		debugPluginHostPort = debugBrkPluginHostPort;
-		debugBrkPluginHost = true;
+	let debugBrkExtensionHostPort = parseNumber(args, '--debugBrkPluginHost', 5870);
+	let debugExtensionHostPort: number;
+	let debugBrkExtensionHost: boolean;
+	if (debugBrkExtensionHostPort) {
+		debugExtensionHostPort = debugBrkExtensionHostPort;
+		debugBrkExtensionHost = true;
 	} else {
-		debugPluginHostPort = parseNumber(args, '--debugPluginHost', 5870, isBuilt ? void 0 : 5870);
+		debugExtensionHostPort = parseNumber(args, '--debugPluginHost', 5870, isBuilt ? void 0 : 5870);
 	}
 
+	let pathArguments = parsePathArguments(args, gotoLineMode);
+
 	return {
-		pathArguments: parsePathArguments(args, gotoLineMode),
+		pathArguments: pathArguments,
 		programStart: parseNumber(args, '--timestamp', 0, 0),
-		workers: parseNumber(args, '--workers', -1, -1),
 		enablePerformance: !!opts['p'],
 		verboseLogging: !!opts['verbose'],
-		debugPluginHostPort: debugPluginHostPort,
-		debugBrkPluginHost: debugBrkPluginHost,
-		logPluginHostCommunication: !!opts['logPluginHostCommunication'],
+		debugExtensionHostPort: debugExtensionHostPort,
+		debugBrkExtensionHost: debugBrkExtensionHost,
+		logExtensionHostCommunication: !!opts['logExtensionHostCommunication'],
 		firstrun: !!opts['squirrel-firstrun'],
 		openNewWindow: !!opts['n'] || !!opts['new-window'],
 		openInSameWindow: !!opts['r'] || !!opts['reuse-window'],
 		gotoLineMode: gotoLineMode,
-		pluginHomePath: normalizePath(parseString(args, '--extensionHomePath')),
-		pluginDevelopmentPath: normalizePath(parseString(args, '--extensionDevelopmentPath')),
-		pluginTestsPath: normalizePath(parseString(args, '--extensionTestsPath')),
-		disablePlugins: !!opts['disableExtensions'] || !!opts['disable-extensions'],
-		locale: parseString(args, '--locale')
+		diffMode: (!!opts['d'] || !!opts['diff']) && pathArguments.length === 2,
+		extensionsHomePath: normalizePath(parseString(args, '--extensionHomePath')),
+		extensionDevelopmentPath: normalizePath(parseString(args, '--extensionDevelopmentPath')),
+		extensionTestsPath: normalizePath(parseString(args, '--extensionTestsPath')),
+		disableExtensions: !!opts['disableExtensions'] || !!opts['disable-extensions'],
+		locale: parseString(args, '--locale'),
+		waitForWindowClose: !!opts['w'] || !!opts['wait']
 	};
 }
 
@@ -275,7 +282,7 @@ function parsePathArguments(argv: string[], gotoLineMode?: boolean): string[] {
 					}
 
 					if (pathCandidate) {
-						pathCandidate = massagePath(pathCandidate);
+						pathCandidate = preparePath(pathCandidate);
 					}
 
 					let realPath: string;
@@ -284,7 +291,7 @@ function parsePathArguments(argv: string[], gotoLineMode?: boolean): string[] {
 					} catch (error) {
 						// in case of an error, assume the user wants to create this file
 						// if the path is relative, we join it to the cwd
-						realPath = path.normalize(path.isAbsolute(pathCandidate) ? pathCandidate : path.join(process.cwd(), pathCandidate));
+						realPath = path.normalize(path.isAbsolute(pathCandidate) ? pathCandidate : path.join(currentWorkingDirectory, pathCandidate));
 					}
 
 					if (!paths.isValidBasename(path.basename(realPath))) {
@@ -305,18 +312,26 @@ function parsePathArguments(argv: string[], gotoLineMode?: boolean): string[] {
 	);
 }
 
-function massagePath(path: string): string {
+function preparePath(p: string): string {
+
+	// Trim trailing quotes
 	if (platform.isWindows) {
-		path = strings.rtrim(path, '"'); // https://github.com/Microsoft/vscode/issues/1498
+		p = strings.rtrim(p, '"'); // https://github.com/Microsoft/vscode/issues/1498
 	}
 
 	// Trim whitespaces
-	path = strings.trim(strings.trim(path, ' '), '\t');
+	p = strings.trim(strings.trim(p, ' '), '\t');
 
-	// Remove trailing dots
-	path = strings.rtrim(path, '.');
+	if (platform.isWindows) {
 
-	return path;
+		// Resolve the path against cwd if it is relative
+		p = path.resolve(currentWorkingDirectory, p);
+
+		// Trim trailing '.' chars on Windows to prevent invalid file names
+		p = strings.rtrim(p, '.');
+	}
+
+	return p;
 }
 
 function normalizePath(p?: string): string {

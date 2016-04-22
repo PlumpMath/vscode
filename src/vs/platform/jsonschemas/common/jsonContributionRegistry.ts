@@ -7,18 +7,15 @@
 import nls = require('vs/nls');
 import {IJSONSchema} from 'vs/base/common/jsonSchema';
 import platform = require('vs/platform/platform');
-import {IPluginDescription} from 'vs/platform/plugins/common/plugins';
-import {PluginsRegistry} from 'vs/platform/plugins/common/pluginsRegistry';
 import {IEventEmitter, EventEmitter} from 'vs/base/common/eventEmitter';
 import {IDisposable} from 'vs/base/common/lifecycle';
 
-export var Extensions = {
+export const Extensions = {
 	JSONContribution: 'base.contributions.json'
 };
 
 export interface ISchemaContributions {
-	schemas?: { [id:string]: IJSONSchema };
-	schemaAssociations?: { [pattern:string]: string[] };
+	schemas?: { [id: string]: IJSONSchema };
 }
 
 export interface IJSONContributionRegistry {
@@ -29,19 +26,14 @@ export interface IJSONContributionRegistry {
 	registerSchema(uri: string, unresolvedSchemaContent: IJSONSchema): void;
 
 	/**
-	 * Register a schema association
-	 */
-	addSchemaFileAssociation(pattern: string, uri:string): void;
-
-	/**
 	 * Get all schemas
 	 */
-	getSchemaContributions() : ISchemaContributions;
+	getSchemaContributions(): ISchemaContributions;
 
 	/**
 	 * Adds a change listener
 	 */
-	addRegistryChangedListener(callback: (e: IJSONContributionRegistryEvent) => void) : IDisposable;
+	addRegistryChangedListener(callback: (e: IJSONContributionRegistryEvent) => void): IDisposable;
 
 }
 
@@ -59,17 +51,15 @@ function normalizeId(id: string) {
 
 
 class JSONContributionRegistry implements IJSONContributionRegistry {
-	private schemasById: { [id:string]:IJSONSchema };
-	private schemaAssociations: { [pattern:string]:string[] };
+	private schemasById: { [id: string]: IJSONSchema };
 	private eventEmitter: IEventEmitter;
 
 	constructor() {
 		this.schemasById = {};
-		this.schemaAssociations = {};
 		this.eventEmitter = new EventEmitter();
 	}
 
-	public addRegistryChangedListener(callback: (e: IJSONContributionRegistryEvent) => void) : IDisposable {
+	public addRegistryChangedListener(callback: (e: IJSONContributionRegistryEvent) => void): IDisposable {
 		return this.eventEmitter.addListener2('registryChanged', callback);
 	}
 
@@ -78,26 +68,15 @@ class JSONContributionRegistry implements IJSONContributionRegistry {
 		this.eventEmitter.emit('registryChanged', {});
 	}
 
-	public addSchemaFileAssociation(pattern: string, uri:string): void {
-		var uris = this.schemaAssociations[pattern];
-		if(!uris) {
-			uris = [];
-			this.schemaAssociations[pattern] = uris;
-		}
-		uris.push(uri);
-		this.eventEmitter.emit('registryChanged', {});
-	}
-
-	public getSchemaContributions() : ISchemaContributions {
+	public getSchemaContributions(): ISchemaContributions {
 		return {
 			schemas: this.schemasById,
-			schemaAssociations: this.schemaAssociations
-		}
+		};
 	}
 
 }
 
-var jsonContributionRegistry = new JSONContributionRegistry();
+const jsonContributionRegistry = new JSONContributionRegistry();
 platform.Registry.add(Extensions.JSONContribution, jsonContributionRegistry);
 
 // preload the schema-schema with a version that contains descriptions.
@@ -303,8 +282,8 @@ jsonContributionRegistry.registerSchema('http://json-schema.org/draft-04/schema#
 				{
 					'type': 'string',
 					'description': nls.localize('schema.json.format', 'Describes the format expected for the value.'),
-					'enum': [ 'date-time', 'uri', 'email', 'hostname', 'ipv4', 'ipv6', 'regex']
-				},{
+					'enum': ['date-time', 'uri', 'email', 'hostname', 'ipv4', 'ipv6', 'regex']
+				}, {
 					'type': 'string'
 				}
 			]

@@ -6,7 +6,7 @@
 'use strict';
 
 import 'vs/css!./media/textdiffeditor';
-import {Promise, TPromise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import nls = require('vs/nls');
 import {Builder} from 'vs/base/browser/builder';
 import {Action, IAction} from 'vs/base/common/actions';
@@ -32,10 +32,12 @@ import {IStorageService} from 'vs/platform/storage/common/storage';
 import {IConfigurationService} from 'vs/platform/configuration/common/configuration';
 import {IEventService} from 'vs/platform/event/common/event';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
+import {ServiceCollection} from 'vs/platform/instantiation/common/serviceCollection';
 import {IMessageService} from 'vs/platform/message/common/message';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
 import {IModeService} from 'vs/editor/common/services/modeService';
 import {IKeybindingService, IKeybindingContextKey} from 'vs/platform/keybinding/common/keybindingService';
+import {IThemeService} from 'vs/workbench/services/themes/common/themeService';
 
 /**
  * The text editor that leverages the monaco diff text editor for the editing experience.
@@ -60,9 +62,10 @@ export class TextDiffEditor extends BaseTextEditor {
 		@IEventService eventService: IEventService,
 		@IWorkbenchEditorService editorService: IWorkbenchEditorService,
 		@IModeService modeService: IModeService,
-		@IKeybindingService keybindingService: IKeybindingService
+		@IKeybindingService keybindingService: IKeybindingService,
+		@IThemeService themeService: IThemeService
 	) {
-		super(TextDiffEditor.ID, telemetryService, instantiationService, contextService, storageService, messageService, configurationService, eventService, editorService, modeService);
+		super(TextDiffEditor.ID, telemetryService, instantiationService, contextService, storageService, messageService, configurationService, eventService, editorService, modeService, themeService);
 
 		this.textDiffEditorVisible = keybindingService.createKey<boolean>('textCompareEditorVisible', false);
 	}
@@ -109,9 +112,7 @@ export class TextDiffEditor extends BaseTextEditor {
 		});
 
 		// Create a special child of instantiator that will delegate all calls to openEditor() to the same diff editor if the input matches with the modified one
-		let diffEditorInstantiator = this.instantiationService.createChild({
-			editorService: delegatingService
-		});
+		let diffEditorInstantiator = this.instantiationService.createChild(new ServiceCollection([IWorkbenchEditorService, delegatingService]));
 
 		return diffEditorInstantiator.createInstance(DiffEditorWidget, parent.getHTMLElement(), this.getCodeEditorOptions());
 	}
@@ -188,7 +189,7 @@ export class TextDiffEditor extends BaseTextEditor {
 			}
 
 			// Otherwise make sure the error bubbles up
-			return Promise.wrapError(error);
+			return TPromise.wrapError(error);
 		});
 	}
 
@@ -291,7 +292,7 @@ export class TextDiffEditor extends BaseTextEditor {
 			inlineModeActive = !inlineModeActive;
 			toggleEditorModeAction.label = inlineModeActive ? sideBySideLabel : inlineLabel;
 
-			return Promise.as(true);
+			return TPromise.as(true);
 		});
 
 		toggleEditorModeAction.order = 50; // Closer to the end
@@ -336,7 +337,7 @@ class NavigateAction extends Action {
 		this.enabled = false;
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		if (this.next) {
 			this.editor.getDiffNavigator().next();
 		} else {

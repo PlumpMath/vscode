@@ -12,7 +12,6 @@ import URI from 'vs/base/common/uri';
 import EditorCommon = require('vs/editor/common/editorCommon');
 import Modes = require('vs/editor/common/modes');
 import nls = require('vs/nls');
-import scanner = require('vs/languages/css/common/parser/cssScanner');
 
 export class CSSIntellisense {
 
@@ -161,14 +160,13 @@ export class CSSIntellisense {
 
 	public getValueEnumProposals(entry:languageFacts.IEntry, result:Modes.ISuggestion[]):Modes.ISuggestion[]{
 		if (entry.values) {
-			var type = 'value';
 			entry.values.forEach((value) => {
 				if (languageFacts.isCommonValue(value)) { // only show if supported by more than one browser
 					result.push({
 						label: value.name,
 						documentationLabel: languageFacts.getEntryDescription(value),
 						codeSnippet: value.name,
-						type: type
+						type: 'value'
 					});
 				}
 			});
@@ -238,7 +236,7 @@ export class CSSIntellisense {
 					label: color,
 					documentationLabel: languageFacts.colors[color],
 					codeSnippet: color,
-					type: '#' + languageFacts.colors[color]
+					type: 'customcolor'
 				});
 			}
 			for (var color in languageFacts.colorKeywords) {
@@ -255,7 +253,7 @@ export class CSSIntellisense {
 				result.push({
 					label: color,
 					codeSnippet: color,
-					type: '#' + color
+					type: 'customcolor'
 				});
 			});
 			CSSIntellisense.colorFunctions.forEach((p) => {
@@ -267,7 +265,7 @@ export class CSSIntellisense {
 					type: 'function'
 				});
 			});
-		};
+		}
 		return result;
 	}
 
@@ -281,7 +279,7 @@ export class CSSIntellisense {
 					type: 'value'
 				});
 			}
-		};
+		}
 		return result;
 	}
 
@@ -295,7 +293,7 @@ export class CSSIntellisense {
 					type: 'value'
 				});
 			}
-		};
+		}
 		return result;
 	}
 
@@ -309,7 +307,7 @@ export class CSSIntellisense {
 					type: 'value'
 				});
 			}
-		};
+		}
 		if (entry.restrictions.indexOf('line-width') !== -1) {
 			languageFacts.lineWidthKeywords.forEach((lineWidth) => {
 				result.push({
@@ -318,7 +316,7 @@ export class CSSIntellisense {
 					type: 'value'
 				});
 			});
-		};
+		}
 		return result;
 	}
 
@@ -333,7 +331,7 @@ export class CSSIntellisense {
 					type: 'value'
 				});
 			}
-		};
+		}
 		if (entry.restrictions.indexOf('box') !== -1 || geometryBox !== -1) {
 			for (var box in languageFacts.boxKeywords) {
 				result.push({
@@ -343,7 +341,7 @@ export class CSSIntellisense {
 					type: 'value'
 				});
 			}
-		};
+		}
 		return result;
 	}
 
@@ -357,7 +355,7 @@ export class CSSIntellisense {
 					type: 'function'
 				});
 			}
-		};
+		}
 		return result;
 	}
 
@@ -371,7 +369,7 @@ export class CSSIntellisense {
 					type: 'function'
 				});
 			}
-		};
+		}
 		return result;
 	}
 
@@ -385,7 +383,7 @@ export class CSSIntellisense {
 					type: 'function'
 				});
 			}
-		};
+		}
 		return result;
 	}
 

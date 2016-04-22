@@ -14,8 +14,6 @@ import {HtmlInput} from '../common/htmlInput';
 import {HtmlPreviewPart} from 'vs/workbench/parts/html/browser/htmlPreviewPart';
 import {Registry} from 'vs/platform/platform';
 import {EditorDescriptor, IEditorRegistry, Extensions as EditorExtensions} from 'vs/workbench/browser/parts/editor/baseEditor';
-
-
 import {SyncDescriptor} from 'vs/platform/instantiation/common/descriptors';
 
 // --- Register Editor
@@ -30,11 +28,11 @@ import {SyncDescriptor} from 'vs/platform/instantiation/common/descriptors';
 KeybindingsRegistry.registerCommandDesc({
 	id: '_workbench.previewHtml',
 	weight: KeybindingsRegistry.WEIGHT.workbenchContrib(0),
-	handler(accessor: ServicesAccessor, args: [URI, EditorPosition]) {
+	handler(accessor: ServicesAccessor, args: [URI|string, EditorPosition]) {
 
 		let [resource, position] = args;
-		let name = resource.fsPath;
-		let input = accessor.get(IInstantiationService).createInstance(HtmlInput, name, undefined, resource);
+		let uri = resource instanceof URI ? resource : URI.parse(resource);
+		let input = accessor.get(IInstantiationService).createInstance(HtmlInput, uri.fsPath, undefined, uri);
 
 		return accessor.get(IWorkbenchEditorService).openEditor(input, null, position)
 			.then(editor => true);

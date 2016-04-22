@@ -5,15 +5,10 @@
 
 import stream = require('stream');
 import uuid = require('vs/base/common/uuid');
-import ee = require('vs/base/common/eventEmitter');
-import { Promise, TPromise } from 'vs/base/common/winjs.base';
-import debug = require('vs/workbench/parts/debug/common/debug');
+import { TPromise } from 'vs/base/common/winjs.base';
 
-export class V8Protocol extends ee.EventEmitter {
+export abstract class V8Protocol {
 
-	public emittedStopped: boolean;
-	public readyForBreakpoints: boolean;
-	protected flowEventsCount: number;
 	private static TWO_CRLF = '\r\n\r\n';
 
 	private outputStream: stream.Writable;
@@ -24,36 +19,11 @@ export class V8Protocol extends ee.EventEmitter {
 	private contentLength: number;
 
 	constructor() {
-		super();
-		this.flowEventsCount = 0;
-		this.emittedStopped = false;
-		this.readyForBreakpoints = false;
 		this.sequence = 1;
 		this.contentLength = -1;
 		this.pendingRequests = {};
 		this.rawData = new Buffer(0);
 		this.id = uuid.generateUuid();
-	}
-
-	public emit(eventType: string, data?: any): void {
-		if (eventType === debug.SessionEvents.STOPPED) {
-			this.emittedStopped = true;
-		}
-		if (eventType === debug.SessionEvents.INITIALIZED) {
-			this.readyForBreakpoints = true;
-		}
-		if (eventType === debug.SessionEvents.CONTINUED || eventType === debug.SessionEvents.STOPPED ||
-			eventType === debug.SessionEvents.DEBUGEE_TERMINATED || eventType === debug.SessionEvents.SERVER_EXIT) {
-			this.flowEventsCount++;
-		}
-		
-		if (data) {
-			data.sessionId = this.getId();
-		} else {
-			data = { sessionId: this.getId() };
-		}
-
-		super.emit(eventType, data);
 	}
 
 	public getId(): string {
@@ -71,7 +41,7 @@ export class V8Protocol extends ee.EventEmitter {
 	}
 
 	protected send(command: string, args: any): TPromise<DebugProtocol.Response> {
-		return new Promise((completeDispatch, errorDispatch) => {
+		return new TPromise((completeDispatch, errorDispatch) => {
 			this.doSend(command, args, (result: DebugProtocol.Response) => {
 				if (result.success) {
 					completeDispatch(result);
@@ -131,19 +101,24 @@ export class V8Protocol extends ee.EventEmitter {
 		}
 	}
 
-	private dispatch(body: string): void {
-		const rawData = JSON.parse(body);
+	protected abstract onServerError(err: Error): void;
+	protected abstract onEvent(event: DebugProtocol.Event): void;
 
-		if (typeof rawData.event !== 'undefined') {
-			const event = <DebugProtocol.Event> rawData;
-			this.emit(event.event, event);
-		} else {
-			const response = <DebugProtocol.Response> rawData;
-			const clb = this.pendingRequests[response.request_seq];
-			if (clb) {
-				delete this.pendingRequests[response.request_seq];
-				clb(response);
+	private dispatch(body: string): void {
+		try {
+			const rawData = JSON.parse(body);
+			if (typeof rawData.event !== 'undefined') {
+				this.onEvent(rawData);
+			} else {
+				const response = <DebugProtocol.Response> rawData;
+				const clb = this.pendingRequests[response.request_seq];
+				if (clb) {
+					delete this.pendingRequests[response.request_seq];
+					clb(response);
+				}
 			}
+		} catch (e) {
+			this.onServerError(new Error(e.message || e));
 		}
 	}
 }

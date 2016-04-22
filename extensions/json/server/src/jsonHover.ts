@@ -9,7 +9,7 @@ import Parser = require('./jsonParser');
 import SchemaService = require('./jsonSchemaService');
 import {IJSONWorkerContribution} from './jsonContributions';
 
-import {Hover, ITextDocument, TextDocumentPosition, Range, MarkedString, RemoteConsole} from 'vscode-languageserver';
+import {Hover, ITextDocument, TextDocumentPosition, Range, MarkedString} from 'vscode-languageserver';
 
 export class JSONHover {
 
@@ -25,7 +25,6 @@ export class JSONHover {
 
 		let offset = document.offsetAt(textDocumentPosition.position);
 		let node = doc.getNodeFromOffset(offset);
-		let originalNode = node;
 
 		// use the property description when hovering over an object key
 		if (node && node.type === 'string') {
@@ -40,6 +39,24 @@ export class JSONHover {
 		if (!node) {
 			return Promise.resolve(void 0);
 		}
+		
+		var createHover = (contents: MarkedString[]) => {
+			let range = Range.create(document.positionAt(node.start), document.positionAt(node.end));
+			let result: Hover = {
+				contents: contents,
+				range: range
+			};
+			return result;
+		};	
+		
+		let location = node.getNodeLocation();
+		for (let i = this.contributions.length - 1; i >= 0; i--) {
+			let contribution = this.contributions[i];
+			let promise = contribution.getInfoContribution(textDocumentPosition.uri, location);
+			if (promise) {
+				return promise.then(htmlContent => createHover(htmlContent));
+			}
+		}
 
 		return this.schemaService.getSchemaForResource(textDocumentPosition.uri, doc).then((schema) => {
 			if (schema) {
@@ -47,33 +64,12 @@ export class JSONHover {
 				doc.validate(schema.schema, matchingSchemas, node.start);
 
 				let description: string = null;
-				let contributonId: string = null;
 				matchingSchemas.every((s) => {
 					if (s.node === node && !s.inverted && s.schema) {
 						description = description || s.schema.description;
-						contributonId = contributonId || s.schema.id;
 					}
 					return true;
 				});
-				
-				var createHover = (contents: MarkedString[]) => {
-					let range = Range.create(document.positionAt(node.start), document.positionAt(node.end));
-					let result: Hover = {
-						contents: contents,
-						range: range
-					};
-					return result;
-				};
-				
-				let location = node.getNodeLocation();
-				for (let i = this.contributions.length - 1; i >= 0; i--) {
-					let contribution = this.contributions[i];
-					let promise = contribution.getInfoContribution(textDocumentPosition.uri, location);
-					if (promise) {
-						return promise.then(htmlContent => createHover(htmlContent));
-					}
-				}
-
 				if (description) {
 					return createHover([description]);
 				}

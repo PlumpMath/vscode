@@ -8,10 +8,9 @@ import URI from 'vs/base/common/uri';
 import {TPromise} from 'vs/base/common/winjs.base';
 import {IEventEmitter} from 'vs/base/common/eventEmitter';
 
-import {ISelection} from 'vs/platform/selection/common/selection';
 import {createDecorator, ServiceIdentifier} from 'vs/platform/instantiation/common/instantiation';
 
-export var IEditorService = createDecorator<IEditorService>('editorService');
+export const IEditorService = createDecorator<IEditorService>('editorService');
 
 export interface IEditorService {
 	serviceId: ServiceIdentifier<any>;
@@ -106,11 +105,6 @@ export interface IEditor {
 	getControl(): IEventEmitter;
 
 	/**
-	 * Returns the selection of this editor.
-	 */
-	getSelection(): ISelection;
-
-	/**
 	 * Asks the underlying control to focus.
 	 */
 	focus(): void;
@@ -131,7 +125,7 @@ export enum Position {
 	RIGHT = 2
 }
 
-export var POSITIONS = [Position.LEFT, Position.CENTER, Position.RIGHT];
+export const POSITIONS = [Position.LEFT, Position.CENTER, Position.RIGHT];
 
 export interface IEditorInput extends IEventEmitter {
 

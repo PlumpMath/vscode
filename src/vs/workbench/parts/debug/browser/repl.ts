@@ -4,7 +4,8 @@
  *--------------------------------------------------------------------------------------------*/
 
 import 'vs/css!./media/repl';
-import { TPromise, Promise } from 'vs/base/common/winjs.base';
+import nls = require('vs/nls');
+import { TPromise } from 'vs/base/common/winjs.base';
 import errors = require('vs/base/common/errors');
 import lifecycle = require('vs/base/common/lifecycle');
 import actions = require('vs/base/common/actions');
@@ -13,6 +14,8 @@ import dom = require('vs/base/browser/dom');
 import platform = require('vs/base/common/platform');
 import tree = require('vs/base/parts/tree/browser/tree');
 import treeimpl = require('vs/base/parts/tree/browser/treeImpl');
+import { IEventService } from 'vs/platform/event/common/event';
+import { EventType, CompositeEvent } from 'vs/workbench/common/events';
 import viewer = require('vs/workbench/parts/debug/browser/replViewer');
 import debug = require('vs/workbench/parts/debug/common/debug');
 import debugactions = require('vs/workbench/parts/debug/electron-browser/debugActions');
@@ -20,17 +23,19 @@ import replhistory = require('vs/workbench/parts/debug/common/replHistory');
 import { Panel } from 'vs/workbench/browser/panel';
 import { ITelemetryService } from 'vs/platform/telemetry/common/telemetry';
 import { IContextViewService, IContextMenuService } from 'vs/platform/contextview/browser/contextView';
-import { IInstantiationService, INullService } from 'vs/platform/instantiation/common/instantiation';
+import { IInstantiationService } from 'vs/platform/instantiation/common/instantiation';
 import { IWorkspaceContextService } from 'vs/workbench/services/workspace/common/contextService';
 import { IStorageService, StorageScope } from 'vs/platform/storage/common/storage';
 import { CommonKeybindings } from 'vs/base/common/keyCodes';
+import {IKeyboardEvent} from 'vs/base/browser/keyboardEvent';
 
 const $ = dom.emmet;
 
-const replTreeOptions = {
+const replTreeOptions: tree.ITreeOptions = {
 	indentPixels: 8,
 	twistiePixels: 20,
-	paddingOnRow: false
+	paddingOnRow: false,
+	ariaLabel: nls.localize('replAriaLabel', "Read Eval Print Loop Panel")
 };
 
 const HISTORY_STORAGE_KEY = 'debug.repl.history';
@@ -58,7 +63,8 @@ export class Repl extends Panel {
 		@ITelemetryService telemetryService: ITelemetryService,
 		@IInstantiationService private instantiationService: IInstantiationService,
 		@IContextViewService private contextViewService: IContextViewService,
-		@IStorageService private storageService: IStorageService
+		@IStorageService private storageService: IStorageService,
+		@IEventService private eventService: IEventService
 	) {
 		super(debug.REPL_ID, telemetryService);
 
@@ -67,19 +73,27 @@ export class Repl extends Panel {
 	}
 
 	private registerListeners(): void {
-		this.toDispose.push(this.debugService.getModel().addListener2(debug.ModelEvents.REPL_ELEMENTS_UPDATED, (re: debug.ITreeElement|debug.ITreeElement[]) => {
-			this.onReplElementsUpdated(re);
+		this.toDispose.push(this.debugService.getModel().onDidChangeReplElements(() => {
+			this.onReplElementsUpdated();
+		}));
+		this.toDispose.push(this.eventService.addListener2(EventType.COMPOSITE_OPENED, (e: CompositeEvent) => {
+			if (e.compositeId === debug.REPL_ID) {
+				const elements = this.debugService.getModel().getReplElements();
+				if (elements.length > 0) {
+					return this.reveal(elements[elements.length - 1]);
+				}
+			}
 		}));
 	}
 
-	private onReplElementsUpdated(re: debug.ITreeElement | debug.ITreeElement[]): void {
+	private onReplElementsUpdated(): void {
 		if (this.tree) {
 			if (this.refreshTimeoutHandle) {
 				return; // refresh already triggered
 			}
 
 			this.refreshTimeoutHandle = setTimeout(() => {
-				delete this.refreshTimeoutHandle;
+				this.refreshTimeoutHandle = null;
 
 				const scrollPosition = this.tree.getScrollPosition();
 				this.tree.refresh().then(() => {
@@ -99,7 +113,7 @@ export class Repl extends Panel {
 		this.replInput = <HTMLInputElement>dom.append(replInputContainer, $('input.repl-input'));
 		this.replInput.type = 'text';
 
-		this.toDispose.push(dom.addStandardDisposableListener(this.replInput, 'keydown', (e: dom.IKeyboardEvent) => {
+		this.toDispose.push(dom.addStandardDisposableListener(this.replInput, 'keydown', (e: IKeyboardEvent) => {
 			let trimmedValue = this.replInput.value.trim();
 
 			if (e.equals(CommonKeybindings.ENTER) && trimmedValue) {
@@ -117,9 +131,8 @@ export class Repl extends Panel {
 				}
 			}
 		}));
-		this.toDispose.push(dom.addStandardDisposableListener(this.replInput, dom.EventType.FOCUS, () => dom.addClass(replInputContainer, 'synthetic-focus'))),
+		this.toDispose.push(dom.addStandardDisposableListener(this.replInput, dom.EventType.FOCUS, () => dom.addClass(replInputContainer, 'synthetic-focus')));
 		this.toDispose.push(dom.addStandardDisposableListener(this.replInput, dom.EventType.BLUR, () => dom.removeClass(replInputContainer, 'synthetic-focus')));
-
 
 		this.characterWidthSurveyor = dom.append(container, $('.surveyor'));
 		this.characterWidthSurveyor.textContent = Repl.HALF_WIDTH_TYPICAL;
@@ -132,6 +145,7 @@ export class Repl extends Panel {
 		this.tree = new treeimpl.Tree(this.treeContainer, {
 			dataSource: new viewer.ReplExpressionsDataSource(this.debugService),
 			renderer: this.renderer,
+			accessibilityProvider: new viewer.ReplExpressionsAccessibilityProvider(),
 			controller: new viewer.ReplExpressionsController(this.debugService, this.contextMenuService, new viewer.ReplExpressionsActionProvider(this.instantiationService), this.replInput, false)
 		}, replTreeOptions);
 
@@ -144,9 +158,10 @@ export class Repl extends Panel {
 
 	public layout(dimension: builder.Dimension): void {
 		if (this.tree) {
-			this.renderer.setWidth(dimension.width - 20, this.characterWidthSurveyor.clientWidth / this.characterWidthSurveyor.textContent.length);
-			this.tree.layout(this.treeContainer.clientHeight);
-			this.tree.refresh().done(null, errors.onUnexpectedError);
+			this.renderer.setWidth(dimension.width - 25, this.characterWidthSurveyor.clientWidth / this.characterWidthSurveyor.textContent.length);
+			this.tree.layout(dimension.height - 22);
+			// refresh the tree because layout might require some elements be word wrapped differently
+			this.tree.refresh().done(undefined, errors.onUnexpectedError);
 		}
 	}
 
@@ -154,7 +169,7 @@ export class Repl extends Panel {
 		this.replInput.focus();
 	}
 
-	public reveal(element: debug.ITreeElement): Promise {
+	public reveal(element: debug.ITreeElement): TPromise<void> {
 		return this.tree.reveal(element);
 	}
 
@@ -178,7 +193,7 @@ export class Repl extends Panel {
 
 	public dispose(): void {
 		// destroy container
-		this.toDispose = lifecycle.disposeAll(this.toDispose);
+		this.toDispose = lifecycle.dispose(this.toDispose);
 
 		super.dispose();
 	}

@@ -5,10 +5,9 @@
 
 import nls = require('vs/nls');
 import strings = require('vs/base/common/strings');
-import { assign } from 'vs/base/common/objects';
 import { Delayer } from 'vs/base/common/async';
-import { emmet as $, append, show, hide, addClass, toggleClass } from 'vs/base/browser/dom';
-import { IDisposable, combinedDispose } from 'vs/base/common/lifecycle';
+import { emmet as $, append, show, hide, toggleClass } from 'vs/base/browser/dom';
+import { IDisposable, combinedDisposable } from 'vs/base/common/lifecycle';
 import { IGitService, ServiceState, IBranch, ServiceOperations, IRemote } from 'vs/workbench/parts/git/common/git';
 import { IStatusbarItem } from 'vs/workbench/browser/parts/statusbar/statusbar';
 import { IQuickOpenService } from 'vs/workbench/services/quickopen/common/quickOpenService';
@@ -93,7 +92,7 @@ export class GitStatusbarItem implements IStatusbarItem {
 
 		this.setState(this.state);
 		this.toDispose.push(this.gitService.addBulkListener2(() => this.onGitServiceChange()));
-		return combinedDispose(...this.toDispose);
+		return combinedDisposable(this.toDispose);
 	}
 
 	private onGitServiceChange(): void {

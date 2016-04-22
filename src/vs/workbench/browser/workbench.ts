@@ -6,9 +6,10 @@
 'use strict';
 
 import 'vs/css!./media/workbench';
-import {TPromise, Promise, ValueCallback} from 'vs/base/common/winjs.base';
+
+import {TPromise, ValueCallback} from 'vs/base/common/winjs.base';
 import types = require('vs/base/common/types');
-import {IDisposable, disposeAll} from 'vs/base/common/lifecycle';
+import {IDisposable, dispose} from 'vs/base/common/lifecycle';
 import strings = require('vs/base/common/strings');
 import DOM = require('vs/base/browser/dom');
 import {Box, Builder, withElementById, $} from 'vs/base/browser/builder';
@@ -17,7 +18,7 @@ import assert = require('vs/base/common/assert');
 import timer = require('vs/base/common/timer');
 import errors = require('vs/base/common/errors');
 import {Registry} from 'vs/platform/platform';
-import {Identifiers, Preferences} from 'vs/workbench/common/constants';
+import {Identifiers} from 'vs/workbench/common/constants';
 import {EventType} from 'vs/workbench/common/events';
 import {IOptions} from 'vs/workbench/common/options';
 import {IWorkbenchContributionsRegistry, Extensions as WorkbenchExtensions} from 'vs/workbench/common/contributions';
@@ -35,39 +36,38 @@ import {IActionBarRegistry, Extensions as ActionBarExtensions} from 'vs/workbenc
 import {ViewletRegistry, Extensions as ViewletExtensions} from 'vs/workbench/browser/viewlet';
 import {PanelRegistry, Extensions as PanelExtensions} from 'vs/workbench/browser/panel';
 import {QuickOpenController} from 'vs/workbench/browser/parts/quickopen/quickOpenController';
+import {DiffEditorInput, toDiffLabel} from 'vs/workbench/common/editor/diffEditorInput';
 import {getServices} from 'vs/platform/instantiation/common/extensions';
 import {AbstractKeybindingService} from 'vs/platform/keybinding/browser/keybindingServiceImpl';
 import {IUntitledEditorService, UntitledEditorService} from 'vs/workbench/services/untitled/common/untitledEditorService';
 import {WorkbenchEditorService} from 'vs/workbench/services/editor/browser/editorService';
 import {Position, Parts, IPartService} from 'vs/workbench/services/part/common/partService';
-import {DEFAULT_THEME_ID} from 'vs/workbench/services/themes/common/themeService';
 import {IWorkspaceContextService as IWorkbenchWorkspaceContextService} from 'vs/workbench/services/workspace/common/contextService';
-import {IStorageService, StorageScope, StorageEvent, StorageEventType} from 'vs/platform/storage/common/storage';
+import {IStorageService, StorageScope} from 'vs/platform/storage/common/storage';
 import {IWorkspace, IConfiguration} from 'vs/platform/workspace/common/workspace';
 import {IKeybindingService} from 'vs/platform/keybinding/common/keybindingService';
-import {IContextMenuService} from 'vs/platform/contextview/browser/contextView';
 import {IActivityService} from 'vs/workbench/services/activity/common/activityService';
 import {IViewletService} from 'vs/workbench/services/viewlet/common/viewletService';
 import {IPanelService} from 'vs/workbench/services/panel/common/panelService';
 import {WorkbenchMessageService} from 'vs/workbench/services/message/browser/messageService';
-import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService'
+import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
 import {IQuickOpenService} from 'vs/workbench/services/quickopen/common/quickOpenService';
 import {IHistoryService} from 'vs/workbench/services/history/common/history';
 import {IEventService} from 'vs/platform/event/common/event';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
+import {ServiceCollection} from 'vs/platform/instantiation/common/serviceCollection';
 import {ILifecycleService} from 'vs/platform/lifecycle/common/lifecycle';
 import {IMessageService} from 'vs/platform/message/common/message';
-import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
+import {ITelemetryService, Extenstions as TelemetryExtensions} from 'vs/platform/telemetry/common/telemetry';
 import {IThreadService} from 'vs/platform/thread/common/thread';
-import {IPluginService} from 'vs/platform/plugins/common/plugins';
-import {AbstractThreadService} from 'vs/platform/thread/common/abstractThreadService';
+import {MainThreadService} from 'vs/platform/thread/common/mainThreadService';
 import {IStatusbarService} from 'vs/workbench/services/statusbar/common/statusbarService';
 
 interface WorkbenchParams {
 	workspace?: IWorkspace;
 	configuration: IConfiguration;
 	options: IOptions;
-	instantiationService: IInstantiationService;
+	serviceCollection: ServiceCollection;
 }
 
 export interface IWorkbenchCallbacks {
@@ -99,19 +99,9 @@ export class Workbench implements IPartService {
 	private editorPart: EditorPart;
 	private statusbarPart: StatusbarPart;
 	private quickOpen: QuickOpenController;
-	private untitledEditorService: IUntitledEditorService;
-	private instantiationService: IInstantiationService;
-	private eventService: IEventService;
-	private contextService: IWorkbenchWorkspaceContextService;
-	private editorService: WorkbenchEditorService;
-	private storageService: IStorageService;
-	private telemetryService: ITelemetryService;
-	private keybindingService: IKeybindingService;
-	private lifecycleService: ILifecycleService;
 	private workbenchLayout: WorkbenchLayout;
 	private toDispose: IDisposable[];
 	private toShutdown: { shutdown: () => void; }[];
-	private currentTheme: string;
 	private callbacks: IWorkbenchCallbacks;
 	private creationPromise: TPromise<boolean>;
 	private creationPromiseComplete: ValueCallback;
@@ -120,7 +110,19 @@ export class Workbench implements IPartService {
 	private panelHidden: boolean;
 	private editorBackgroundDelayer: Delayer<void>;
 
-	constructor(container: HTMLElement, workspace: IWorkspace, configuration: IConfiguration, options: IOptions, instantiationService: IInstantiationService) {
+	constructor(container: HTMLElement, workspace: IWorkspace, configuration: IConfiguration, options: IOptions, serviceCollection: ServiceCollection,
+		@IInstantiationService private instantiationService: IInstantiationService,
+		@IUntitledEditorService private untitledEditorService: IUntitledEditorService,
+		@IEventService private eventService: IEventService,
+		@IWorkbenchWorkspaceContextService private contextService: IWorkbenchWorkspaceContextService,
+		@IWorkbenchEditorService private editorService: WorkbenchEditorService,
+		@IStorageService private storageService: IStorageService,
+		@ITelemetryService private telemetryService: ITelemetryService,
+		@IKeybindingService private keybindingService: IKeybindingService,
+		@ILifecycleService private lifecycleService: ILifecycleService,
+		@IMessageService private messageService: IMessageService,
+		@IThreadService private threadService: IThreadService
+	) {
 
 		// Validate params
 		this.validateParams(container, configuration, options);
@@ -140,10 +142,9 @@ export class Workbench implements IPartService {
 			workspace: workspace,
 			configuration: configuration,
 			options: options || {},
-			instantiationService
+			serviceCollection
 		};
 
-		this.currentTheme = null;
 		this.toDispose = [];
 		this.toShutdown = [];
 		this.editorBackgroundDelayer = new Delayer<void>(50);
@@ -200,7 +201,7 @@ export class Workbench implements IPartService {
 			this.registerEmitters();
 
 			// Load composits and editors in parallel
-			let compositeAndEditorPromises: Promise[] = [];
+			let compositeAndEditorPromises: TPromise<any>[] = [];
 
 			// Show default viewlet unless sidebar is hidden or we dont have a default viewlet
 			let viewletRegistry = (<ViewletRegistry>Registry.as(ViewletExtensions.Viewlets));
@@ -222,31 +223,44 @@ export class Workbench implements IPartService {
 
 			// Check for configured options to open files on startup and resolve if any or open untitled for empty workbench
 			let editorTimerEvent = timer.start(timer.Topic.STARTUP, strings.format('Restoring Editor(s)'));
-			let resolveEditorInputsPromise: TPromise<EditorInput[]> = Promise.as(null);
+			let resolveEditorInputsPromise: TPromise<EditorInput[]> = TPromise.as(null);
 			let options: EditorOptions[] = [];
 
-			// Files to open or create
-			if ((this.workbenchParams.options.filesToCreate && this.workbenchParams.options.filesToCreate.length) || (this.workbenchParams.options.filesToOpen && this.workbenchParams.options.filesToOpen.length)) {
-				let inputs: EditorInput[] = [];
-				let filesToCreate = this.workbenchParams.options.filesToCreate || [];
-				let filesToOpen = this.workbenchParams.options.filesToOpen || [];
+			// Files to open, diff or create
+			const wbopt = this.workbenchParams.options;
+			if ((wbopt.filesToCreate && wbopt.filesToCreate.length) || (wbopt.filesToOpen && wbopt.filesToOpen.length) || (wbopt.filesToDiff && wbopt.filesToDiff.length)) {
+				let filesToCreate = wbopt.filesToCreate || [];
+				let filesToOpen = wbopt.filesToOpen || [];
+				let filesToDiff = wbopt.filesToDiff;
 
-				// Files to create
-				inputs.push(...filesToCreate.map((resourceInput) => this.untitledEditorService.createOrGet(resourceInput.resource)));
-				options.push(...filesToCreate.map(r => null)); // fill empty options for files to create because we dont have options there
+				// Files to diff is exclusive
+				if (filesToDiff && filesToDiff.length) {
+					resolveEditorInputsPromise = TPromise.join<EditorInput>(filesToDiff.map((resourceInput) => this.editorService.inputToType(resourceInput))).then((inputsToDiff) => {
+						return [new DiffEditorInput(toDiffLabel(filesToDiff[0].resource, filesToDiff[1].resource, this.contextService), null, inputsToDiff[0], inputsToDiff[1])];
+					});
+				}
 
-				// Files to open
-				resolveEditorInputsPromise = Promise.join(filesToOpen.map((resourceInput) => this.editorService.inputToType(resourceInput))).then((inputsToOpen) => {
-					inputs.push(...inputsToOpen);
-					options.push(...filesToOpen.map(resourceInput => TextEditorOptions.from(resourceInput)));
+				// Otherwise: Open/Create files
+				else {
+					let inputs: EditorInput[] = [];
 
-					return inputs;
-				});
+					// Files to create
+					inputs.push(...filesToCreate.map((resourceInput) => this.untitledEditorService.createOrGet(resourceInput.resource)));
+					options.push(...filesToCreate.map(r => null)); // fill empty options for files to create because we dont have options there
+
+					// Files to open
+					resolveEditorInputsPromise = TPromise.join<EditorInput>(filesToOpen.map((resourceInput) => this.editorService.inputToType(resourceInput))).then((inputsToOpen) => {
+						inputs.push(...inputsToOpen);
+						options.push(...filesToOpen.map(resourceInput => TextEditorOptions.from(resourceInput)));
+
+						return inputs;
+					});
+				}
 			}
 
 			// Empty workbench
 			else if (!this.workbenchParams.workspace) {
-				resolveEditorInputsPromise = Promise.as([this.untitledEditorService.createOrGet()]);
+				resolveEditorInputsPromise = TPromise.as([this.untitledEditorService.createOrGet()]);
 			}
 
 			// Restore editor state (either from last session or with given inputs)
@@ -258,7 +272,7 @@ export class Workbench implements IPartService {
 			}));
 
 			// Flag workbench as created once done
-			Promise.join(compositeAndEditorPromises).then(() => {
+			const workbenchDone = (error?: Error) => {
 				this.workbenchCreated = true;
 				this.eventService.emit(EventType.WORKBENCH_CREATED);
 				this.creationPromiseComplete(true);
@@ -266,7 +280,13 @@ export class Workbench implements IPartService {
 				if (this.callbacks && this.callbacks.onWorkbenchStarted) {
 					this.callbacks.onWorkbenchStarted();
 				}
-			}, errors.onUnexpectedError);
+
+				if (error) {
+					errors.onUnexpectedError(error);
+				}
+			};
+
+			TPromise.join(compositeAndEditorPromises).then(() => workbenchDone(), (error) => workbenchDone(error));
 		} catch (error) {
 
 			// Print out error
@@ -278,137 +298,79 @@ export class Workbench implements IPartService {
 	}
 
 	private initServices(): void {
-		this.instantiationService = this.workbenchParams.instantiationService;
+		const {serviceCollection} = this.workbenchParams;
 
-		// Services we expect
-		this.eventService = this.instantiationService.getInstance(IEventService);
-		this.storageService = this.instantiationService.getInstance(IStorageService);
-		this.keybindingService = this.instantiationService.getInstance(IKeybindingService);
-		this.contextService = this.instantiationService.getInstance(IWorkbenchWorkspaceContextService);
-		this.telemetryService = this.instantiationService.getInstance(ITelemetryService);
-		let messageService = this.instantiationService.getInstance(IMessageService);
-		if (this.keybindingService instanceof AbstractKeybindingService) {
-			(<AbstractKeybindingService><any>this.keybindingService).setMessageService(messageService);
-		}
-		let threadService = this.instantiationService.getInstance(IThreadService);
-		let pluginService = this.instantiationService.getInstance(IPluginService);
-		this.lifecycleService = this.instantiationService.getInstance(ILifecycleService);
 		this.toDispose.push(this.lifecycleService.onShutdown(this.shutdownComponents, this));
-		let contextMenuService = this.instantiationService.getInstance(IContextMenuService);
-		this.untitledEditorService = this.instantiationService.getInstance(IUntitledEditorService);
 
 		// Services we contribute
-		this.instantiationService.addSingleton(IPartService, this);
+		serviceCollection.set(IPartService, this);
 
 		// Viewlet service (sidebar part)
-		this.sidebarPart = new SidebarPart(
-			messageService,
-			this.storageService,
-			this.eventService,
-			this.telemetryService,
-			contextMenuService,
-			this,
-			this.keybindingService,
-			Identifiers.SIDEBAR_PART
-		);
+		this.sidebarPart = this.instantiationService.createInstance(SidebarPart, Identifiers.SIDEBAR_PART);
 		this.toDispose.push(this.sidebarPart);
 		this.toShutdown.push(this.sidebarPart);
-		this.instantiationService.addSingleton(IViewletService, this.sidebarPart);
+		serviceCollection.set(IViewletService, this.sidebarPart);
 
 		// Panel service (panel part)
-		this.panelPart = new PanelPart(
-			messageService,
-			this.storageService,
-			this.eventService,
-			this.telemetryService,
-			contextMenuService,
-			this,
-			this.keybindingService,
-			Identifiers.PANEL_PART
-		);
+		this.panelPart = this.instantiationService.createInstance(PanelPart, Identifiers.PANEL_PART);
 		this.toDispose.push(this.panelPart);
 		this.toShutdown.push(this.panelPart);
-		this.instantiationService.addSingleton(IPanelService, this.panelPart);
+		serviceCollection.set(IPanelService, this.panelPart);
 
 		// Activity service (activitybar part)
-		this.activitybarPart = new ActivitybarPart(
-			this.sidebarPart,
-			messageService,
-			this.telemetryService,
-			this.eventService,
-			contextMenuService,
-			this.keybindingService,
-			Identifiers.ACTIVITYBAR_PART
-		);
+		this.activitybarPart = this.instantiationService.createInstance(ActivitybarPart, Identifiers.ACTIVITYBAR_PART);
 		this.toDispose.push(this.activitybarPart);
 		this.toShutdown.push(this.activitybarPart);
-		this.instantiationService.addSingleton(IActivityService, this.activitybarPart);
+		serviceCollection.set(IActivityService, this.activitybarPart);
 
 		// Editor service (editor part)
-		this.editorPart = new EditorPart(
-			messageService,
-			this.eventService,
-			this.telemetryService,
-			this.storageService,
-			this,
-			Identifiers.EDITOR_PART
-		);
+		this.editorPart = this.instantiationService.createInstance(EditorPart, Identifiers.EDITOR_PART);
 		this.toDispose.push(this.editorPart);
 		this.toShutdown.push(this.editorPart);
 		this.editorService = new WorkbenchEditorService(
 			this.editorPart,
-			this.untitledEditorService
+			this.untitledEditorService,
+			this.instantiationService
 		);
-		this.instantiationService.addSingleton(IWorkbenchEditorService, this.editorService);
+		serviceCollection.set(IWorkbenchEditorService, this.editorService);
 
 		// Quick open service (quick open controller)
-		this.quickOpen = new QuickOpenController(
-			this.eventService,
-			this.storageService,
-			this.editorService,
-			this.sidebarPart,
-			messageService,
-			this.telemetryService,
-			this.contextService,
-			this.keybindingService
-		);
+		this.quickOpen = this.instantiationService.createInstance(QuickOpenController);
 		this.toDispose.push(this.quickOpen);
 		this.toShutdown.push(this.quickOpen);
-		this.instantiationService.addSingleton(IQuickOpenService, this.quickOpen);
+		serviceCollection.set(IQuickOpenService, this.quickOpen);
 
 		// Status bar
-		this.statusbarPart = new StatusbarPart(Identifiers.STATUSBAR_PART);
+		this.statusbarPart = this.instantiationService.createInstance(StatusbarPart, Identifiers.STATUSBAR_PART);
 		this.toDispose.push(this.statusbarPart);
 		this.toShutdown.push(this.statusbarPart);
-		this.instantiationService.addSingleton(IStatusbarService, this.statusbarPart);
+		serviceCollection.set(IStatusbarService, this.statusbarPart);
 
 		// History
-		this.instantiationService.addSingleton(IHistoryService, new HistoryService(this.eventService, this.editorService, this.contextService, this.quickOpen));
+		serviceCollection.set(IHistoryService, new HistoryService(this.eventService, this.editorService, this.contextService, this.quickOpen));
 
 		// a new way to contribute services...
 		let contributedServices = getServices();
 		for (let contributedService of contributedServices) {
-			this.instantiationService.addSingleton(contributedService.id, contributedService.descriptor);
+			serviceCollection.set(contributedService.id, contributedService.descriptor);
 		}
 
 		// Some services need to be set explicitly after all services are created
-		(<AbstractThreadService><any>threadService).setInstantiationService(this.instantiationService);
-		this.telemetryService.setInstantiationService(this.instantiationService);
-		(<WorkbenchMessageService>messageService).setWorkbenchServices(this.quickOpen, this.statusbarPart);
-		this.quickOpen.setInstantiationService(this.instantiationService);
-		this.statusbarPart.setInstantiationService(this.instantiationService);
-		this.activitybarPart.setInstantiationService(this.instantiationService);
-		this.sidebarPart.setInstantiationService(this.instantiationService);
-		this.panelPart.setInstantiationService(this.instantiationService);
-		this.editorPart.setInstantiationService(this.instantiationService);
+		if (this.threadService instanceof MainThreadService) {
+			(<MainThreadService>this.threadService).setInstantiationService(this.instantiationService);
+		}
+		if (this.messageService instanceof WorkbenchMessageService) {
+			(<WorkbenchMessageService>this.messageService).setWorkbenchServices(this.quickOpen, this.statusbarPart);
+		}
 		(<UntitledEditorService>this.untitledEditorService).setInstantiationService(this.instantiationService);
-		this.editorService.setInstantiationService(this.instantiationService);
 
 		// Set the some services to registries that have been created eagerly
 		(<AbstractKeybindingService><any>this.keybindingService).setInstantiationService(this.instantiationService);
 		<IActionBarRegistry>Registry.as(ActionBarExtensions.Actionbar).setInstantiationService(this.instantiationService);
 		<IWorkbenchContributionsRegistry>Registry.as(WorkbenchExtensions.Workbench).setInstantiationService(this.instantiationService);
 		<IEditorRegistry>Registry.as(EditorExtensions.Editors).setInstantiationService(this.instantiationService);
+
+		this.instantiationService.invokeFunction(TelemetryExtensions.TelemetryAppenders.activate);
 	}
 
 	private initSettings(): void {
@@ -629,7 +591,7 @@ export class Workbench implements IPartService {
 	public dispose(): void {
 
 		// Dispose all
-		this.toDispose = disposeAll(this.toDispose);
+		this.toDispose = dispose(this.toDispose);
 
 		// Event
 		this.eventService.emit(EventType.WORKBENCH_DISPOSED);
@@ -668,15 +630,6 @@ export class Workbench implements IPartService {
 	}
 
 	private registerListeners(): void {
-
-		// Listen to Preference changes
-		this.toDispose.push(this.toDisposable(this.eventService.addListener(StorageEventType.STORAGE, (e: StorageEvent) => {
-			switch (e.key) {
-				case Preferences.THEME:
-					this.applyTheme(e.newValue);
-					break;
-			}
-		})));
 
 		// Listen to editor changes
 		this.toDispose.push(this.toDisposable(this.eventService.addListener(EventType.EDITOR_CLOSED, () => this.onEditorOpenedOrClosed())));
@@ -759,26 +712,8 @@ export class Workbench implements IPartService {
 		// Create QuickOpen
 		this.createQuickOpen();
 
-		// Check theme in preferences
-		let currentTheme = this.storageService.get(Preferences.THEME, StorageScope.GLOBAL, DEFAULT_THEME_ID);
-
-		// Apply theme
-		this.applyTheme(currentTheme);
-
 		// Add Workbench to DOM
 		this.workbenchContainer.build(this.container);
-	}
-
-	private applyTheme(theme: string): void {
-		if (this.currentTheme) {
-			this.workbench.removeClass(this.currentTheme);
-		}
-
-		this.currentTheme = theme || null;
-
-		if (this.currentTheme) {
-			this.workbench.addClass(this.currentTheme);
-		}
 	}
 
 	private createActivityBarPart(): void {

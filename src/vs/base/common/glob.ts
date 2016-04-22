@@ -8,9 +8,10 @@ import strings = require('vs/base/common/strings');
 import paths = require('vs/base/common/paths');
 
 const CACHE: { [glob: string]: RegExp } = Object.create(null);
+const MAX_CACHED = 10000;
 
 export interface IExpression {
-	[pattern: string]: boolean|SiblingClause|any;
+	[pattern: string]: boolean | SiblingClause | any;
 }
 
 export interface SiblingClause {
@@ -231,18 +232,45 @@ function globToRegExp(pattern: string): RegExp {
 	regEx = '^' + regEx + '$';
 
 	// Convert to regexp and be ready for errors
-	let result: RegExp;
-	try {
-		result = new RegExp(regEx);
-	} catch (error) {
-		result = /.^/; // create a regex that matches nothing if we cannot parse the pattern
-	}
+	let result = toRegExp(regEx);
 
-	// Make sure to cache
-	CACHE[pattern] = result;
+	// Make sure to cache (bounded)
+	if (Object.getOwnPropertyNames(CACHE).length < MAX_CACHED) {
+		CACHE[pattern] = result;
+	}
 
 	return result;
 }
+
+function toRegExp(regEx: string): RegExp {
+	try {
+		return new RegExp(regEx);
+	} catch (error) {
+		return /.^/; // create a regex that matches nothing if we cannot parse the pattern
+	}
+}
+
+function testWithCache(glob: string, pattern: RegExp, cache: { [glob: string]: boolean }): boolean {
+	let res = cache[glob];
+	if (typeof res !== 'boolean') {
+		res = pattern.test(glob);
+
+		// Make sure to cache (bounded)
+		if (Object.getOwnPropertyNames(cache).length < MAX_CACHED) {
+			cache[glob] = res;
+		}
+	}
+
+	return res;
+}
+
+// regexes to check for trival glob patterns that just check for String#endsWith
+const trivia1 = /^\*\*\/\*\.[\w\.-]+$/; 						// **/*.something
+const trivia2 = /^\*\*\/[\w\.-]+$/; 							// **/something
+const trivia3 = /^{\*\*\/\*\.[\w\.-]+(,\*\*\/\*\.[\w\.-]+)*}$/; // {**/*.something,**/*.else}
+const T1_CACHE: { [glob: string]: boolean } = Object.create(null);
+const T2_CACHE: { [glob: string]: boolean } = Object.create(null);
+const T3_CACHE: { [glob: string]: boolean } = Object.create(null);
 
 /**
  * Simplified glob matching. Supports a subset of glob patterns:
@@ -254,14 +282,33 @@ function globToRegExp(pattern: string): RegExp {
  */
 export function match(pattern: string, path: string): boolean;
 export function match(expression: IExpression, path: string, siblings?: string[]): string /* the matching pattern */;
-export function match(arg1: string|IExpression, path: string, siblings?: string[]): any {
+export function match(arg1: string | IExpression, path: string, siblings?: string[]): any {
 	if (!arg1 || !path) {
 		return false;
 	}
 
 	// Glob with String
 	if (typeof arg1 === 'string') {
-		var regExp = globToRegExp(arg1);
+
+		// common pattern: **/*.txt just need endsWith check
+		if (testWithCache(arg1, trivia1, T1_CACHE)) {
+			return strings.endsWith(path, arg1.substr(4)); // '**/*'.length === 4
+		}
+
+		// common pattern: **/some.txt just need basename check
+		if (testWithCache(arg1, trivia2, T2_CACHE)) {
+			const base = arg1.substr(3); // '**/'.length === 3
+
+			return path === base || strings.endsWith(path, `/${base}`) || strings.endsWith(path, `\\${base}`);
+		}
+
+		// repetition of common patterns (see above) {**/*.txt,**/*.png}
+		if (testWithCache(arg1, trivia3, T3_CACHE)) {
+			return arg1.slice(1, -1).split(',').some(pattern => match(pattern, path));
+		}
+
+		const regExp = globToRegExp(arg1);
+
 		return regExp && regExp.test(path);
 	}
 
@@ -271,6 +318,7 @@ export function match(arg1: string|IExpression, path: string, siblings?: string[
 
 function matchExpression(expression: IExpression, path: string, siblings?: string[]): string /* the matching pattern */ {
 	let patterns = Object.getOwnPropertyNames(expression);
+	let basename: string;
 	for (let i = 0; i < patterns.length; i++) {
 		let pattern = patterns[i];
 
@@ -293,9 +341,12 @@ function matchExpression(expression: IExpression, path: string, siblings?: strin
 					continue; // pattern is malformed or we don't have siblings
 				}
 
+				if (!basename) {
+					basename = strings.rtrim(paths.basename(path), paths.extname(path));
+				}
+
 				let clause = <SiblingClause>value;
-				let basename = strings.rtrim(paths.basename(path), paths.extname(path));
-				var clausePattern = strings.replaceAll(clause.when, '$(basename)', basename);
+				let clausePattern = clause.when.replace('$(basename)', basename);
 				if (siblings.some((sibling) => sibling === clausePattern)) {
 					return pattern;
 				} else {

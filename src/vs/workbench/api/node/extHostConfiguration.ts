@@ -5,25 +5,24 @@
 'use strict';
 
 import {clone} from 'vs/base/common/objects';
-import {IDisposable, disposeAll} from 'vs/base/common/lifecycle';
+import {IDisposable, dispose} from 'vs/base/common/lifecycle';
 import {IThreadService, Remotable} from 'vs/platform/thread/common/thread';
 import {IConfigurationService, ConfigurationServiceEventTypes, IConfigurationServiceEvent} from 'vs/platform/configuration/common/configuration';
 import Event, {Emitter} from 'vs/base/common/event';
-import {INullService} from 'vs/platform/instantiation/common/instantiation';
 import {WorkspaceConfiguration} from 'vscode';
 
-@Remotable.PluginHostContext('ExtHostConfiguration')
+@Remotable.ExtHostContext('ExtHostConfiguration')
 export class ExtHostConfiguration {
 
 	private _config: any;
 	private _hasConfig: boolean;
 	private _onDidChangeConfiguration: Emitter<void>;
 
-	constructor(@INullService ns) {
+	constructor() {
 		this._onDidChangeConfiguration = new Emitter<void>();
 	}
 
-	get onDidChangeConfiguration() {
+	get onDidChangeConfiguration(): Event<void> {
 		return this._onDidChangeConfiguration && this._onDidChangeConfiguration.event;
 	}
 
@@ -89,12 +88,10 @@ export class MainThreadConfiguration {
 		this._toDispose.push(this._configurationService.addListener2(ConfigurationServiceEventTypes.UPDATED, (e:IConfigurationServiceEvent) => {
 			this._proxy._acceptConfigurationChanged(e.config);
 		}));
-		this._configurationService.loadConfiguration().then((config) => {
-			this._proxy._acceptConfigurationChanged(config);
-		});
+		this._proxy._acceptConfigurationChanged(this._configurationService.getConfiguration());
 	}
 
 	public dispose(): void {
-		this._toDispose = disposeAll(this._toDispose);
+		this._toDispose = dispose(this._toDispose);
 	}
 }

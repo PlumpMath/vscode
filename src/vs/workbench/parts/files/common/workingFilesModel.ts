@@ -10,7 +10,7 @@ import Event, {Emitter} from 'vs/base/common/event';
 import paths = require('vs/base/common/paths');
 import errors = require('vs/base/common/errors');
 import labels = require('vs/base/common/labels');
-import {disposeAll, IDisposable} from 'vs/base/common/lifecycle';
+import {dispose, IDisposable} from 'vs/base/common/lifecycle';
 import {ITextFileService, IWorkingFilesModel, IWorkingFileModelChangeEvent, IWorkingFileEntry, EventType, LocalFileChangeEvent, WORKING_FILES_MODEL_ENTRY_CLASS_ID, AutoSaveMode} from 'vs/workbench/parts/files/common/files';
 import {IFileStat, FileChangeType, FileChangesEvent, EventType as FileEventType} from 'vs/platform/files/common/files';
 import {UntitledEditorEvent, EventType as WorkbenchEventType, EditorEvent} from 'vs/workbench/common/events';
@@ -18,7 +18,7 @@ import {IUntitledEditorService} from 'vs/workbench/services/untitled/common/unti
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
 import {IPartService} from 'vs/workbench/services/part/common/partService';
 import {IWorkspaceContextService} from 'vs/workbench/services/workspace/common/contextService';
-import {asFileEditorInput} from 'vs/workbench/common/editor';
+import {asFileEditorInput, getUntitledOrFileResource} from 'vs/workbench/common/editor';
 import {IStorageService, StorageScope} from 'vs/platform/storage/common/storage';
 import {IEventService} from 'vs/platform/event/common/event';
 
@@ -27,6 +27,7 @@ export class WorkingFilesModel implements IWorkingFilesModel {
 	private static STORAGE_KEY = 'workingFiles.model.entries';
 
 	private entries: WorkingFileEntry[];
+	private recentlyClosedEntries: WorkingFileEntry[];
 	private pathLabelProvider: labels.PathLabelProvider;
 	private mapEntryToResource: { [resource: string]: WorkingFileEntry; };
 	private _onModelChange: Emitter<IWorkingFileModelChangeEvent>;
@@ -44,6 +45,7 @@ export class WorkingFilesModel implements IWorkingFilesModel {
 	) {
 		this.pathLabelProvider = new labels.PathLabelProvider(this.contextService);
 		this.entries = [];
+		this.recentlyClosedEntries = [];
 		this.toDispose = [];
 		this.mapEntryToResource = Object.create(null);
 		this._onModelChange = new Emitter<IWorkingFileModelChangeEvent>();
@@ -276,6 +278,9 @@ export class WorkingFilesModel implements IWorkingFilesModel {
 		let resource: uri = arg1 instanceof WorkingFileEntry ? (<WorkingFileEntry>arg1).resource : <uri>arg1;
 		let index = this.indexOf(resource);
 		if (index >= 0) {
+			if (resource.scheme === 'file') {
+				this.recordRecentlyClosedEntries([this.mapEntryToResource[resource.toString()]]);
+			}
 
 			// Remove entry
 			let removed = this.entries.splice(index, 1)[0];
@@ -300,6 +305,13 @@ export class WorkingFilesModel implements IWorkingFilesModel {
 		return null;
 	}
 
+	public popLastClosedEntry(): WorkingFileEntry {
+		if (this.recentlyClosedEntries.length > 0) {
+			return this.recentlyClosedEntries.pop();
+		}
+		return null;
+	}
+
 	public reorder(source: WorkingFileEntry, target: WorkingFileEntry): void {
 		let sortedEntries = this.entries.slice(0).sort(WorkingFilesModel.compare);
 
@@ -319,6 +331,7 @@ export class WorkingFilesModel implements IWorkingFilesModel {
 	}
 
 	public clear(): void {
+		this.recordRecentlyClosedEntries(this.entries);
 		let deleted = this.entries;
 		this.entries = [];
 		this.mapEntryToResource = Object.create(null);
@@ -331,6 +344,28 @@ export class WorkingFilesModel implements IWorkingFilesModel {
 
 	public findEntry(resource: uri): WorkingFileEntry {
 		return this.mapEntryToResource[resource.toString()];
+	}
+
+	private recordRecentlyClosedEntries(resources: WorkingFileEntry[]): void {
+		if (resources.length === 0) {
+			return;
+		}
+
+		// Put the active entry on the top of the stack
+		let input = this.editorService.getActiveEditorInput();
+		let resource: uri = getUntitledOrFileResource(input);
+		let activeEntry: WorkingFileEntry;
+		if (resource) {
+			activeEntry = this.findEntry(resource);
+		}
+
+		this.recentlyClosedEntries = this.recentlyClosedEntries.concat(resources.filter(e => {
+			return !activeEntry || e.resource.path !== activeEntry.resource.path;
+		}));
+
+		if (activeEntry) {
+			this.recentlyClosedEntries.push(activeEntry);
+		}
 	}
 
 	private indexOf(resource: uri): number {
@@ -371,9 +406,13 @@ export class WorkingFilesModel implements IWorkingFilesModel {
 
 		// Add those that are set to open on startup
 		let options = this.contextService.getOptions();
-		let filesToOpen = (options && options.filesToOpen) || [];
+		let files = (options && options.filesToOpen) || [];
+		if (options && options.filesToDiff) {
+			files.push(...options.filesToDiff);
+		}
+
 		arrays
-			.distinct(filesToOpen, (r) => r.resource.toString())					// no duplicates
+			.distinct(files, (r) => r.resource.toString())							// no duplicates
 			.map((f) => f.resource)													// just the resource
 			.filter((r) => r.scheme === 'untitled' || this.isOutOfWorkspace(r))		// untitled or out of workspace
 			.forEach((r) => {
@@ -393,7 +432,7 @@ export class WorkingFilesModel implements IWorkingFilesModel {
 	}
 
 	public dispose(): void {
-		this.toDispose = disposeAll(this.toDispose);
+		this.toDispose = dispose(this.toDispose);
 	}
 
 	private fireModelChange(event: IWorkingFileModelChangeEvent): void {

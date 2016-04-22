@@ -42,7 +42,6 @@ KeybindingsRegistry.registerCommandDesc({
 	}
 });
 
-
 class OpenSearchViewletAction extends ToggleViewletAction {
 	public static ID = VIEWLET_ID;
 	public static LABEL = nls.localize('showSearchViewlet', "Show Search");
@@ -53,7 +52,6 @@ class OpenSearchViewletAction extends ToggleViewletAction {
 }
 
 class ExplorerViewerActionContributor extends ActionBarContributor {
-
 	private _instantiationService: IInstantiationService;
 	private _contextService: IWorkspaceContextService;
 
@@ -126,7 +124,8 @@ const openSearchViewletKb: IKeybindings = {
 
 (<IWorkbenchActionRegistry>Registry.as(ActionExtensions.WorkbenchActions)).registerWorkbenchAction(
 	new SyncActionDescriptor(OpenSearchViewletAction, OpenSearchViewletAction.ID, OpenSearchViewletAction.LABEL, openSearchViewletKb),
-	nls.localize('view', "View")
+	nls.localize('view', "View"),
+	['open', 'search']
 );
 
 // Contribute to Explorer Viewer
@@ -162,7 +161,7 @@ actionBarRegistry.registerActionBarContributor(Scope.VIEWER, ExplorerViewerActio
 const registry = <IWorkbenchActionRegistry>Registry.as(ActionExtensions.WorkbenchActions);
 registry.registerWorkbenchAction(new SyncActionDescriptor(ShowAllSymbolsAction, ACTION_ID, ACTION_LABEL, {
 	primary: KeyMod.CtrlCmd | KeyCode.KEY_T
-}));
+}), ['show', 'symbols', 'search']);
 
 // Configuration
 const configurationRegistry = <IConfigurationRegistry>Registry.as(ConfigurationExtensions.Configuration);
@@ -173,9 +172,8 @@ configurationRegistry.registerConfiguration({
 	'type': 'object',
 	'properties': {
 		'search.exclude': {
-			'id': 'glob-pattern',
 			'type': 'object',
-			'description': nls.localize('exclude', "Configure glob patterns for excluding files and folders in searches. Inherits all glob patterns from the file.exclude setting."),
+			'description': nls.localize('exclude', "Configure glob patterns for excluding files and folders in searches. Inherits all glob patterns from the files.exclude setting."),
 			'default': { '**/node_modules': true, '**/bower_components': true },
 			'additionalProperties': {
 				'anyOf': [

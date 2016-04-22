@@ -6,7 +6,7 @@
 
 import {IWorkbenchContribution} from 'vs/workbench/common/contributions';
 import {IWorkspaceContextService} from 'vs/workbench/services/workspace/common/contextService';
-import {IStorageService, StorageScope, StorageEvent, StorageEventType} from 'vs/platform/storage/common/storage';
+import {IStorageService} from 'vs/platform/storage/common/storage';
 import {ITelemetryService, ITelemetryInfo} from 'vs/platform/telemetry/common/telemetry';
 
 /**
@@ -26,7 +26,7 @@ export abstract class AbstractGettingStarted implements IWorkbenchContribution {
 		const env = contextService.getConfiguration().env;
 		this.appName = env.appName;
 
-		if (env.welcomePage && !env.pluginTestsPath /* do not open a browser when we run tests */) {
+		if (env.welcomePage && !env.extensionTestsPath /* do not open a browser when we run tests */) {
 			this.welcomePageURL =  env.welcomePage;
 			this.handleWelcome();
 		}

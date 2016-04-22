@@ -5,17 +5,14 @@
 
 'use strict';
 
+import {illegalArgument, onUnexpectedError} from 'vs/base/common/errors';
 import URI from 'vs/base/common/uri';
+import {TPromise} from 'vs/base/common/winjs.base';
 import {Range} from 'vs/editor/common/core/range';
 import {IModel, IRange} from 'vs/editor/common/editorCommon';
-import {TPromise} from 'vs/base/common/winjs.base';
-import {onUnexpectedError, illegalArgument} from 'vs/base/common/errors';
-import {IQuickFixSupport, IQuickFix} from 'vs/editor/common/modes';
-import {IModelService} from 'vs/editor/common/services/modelService';
 import {CommonEditorRegistry} from 'vs/editor/common/editorCommonExtensions';
-import LanguageFeatureRegistry from 'vs/editor/common/modes/languageFeatureRegistry';
-
-export const QuickFixRegistry = new LanguageFeatureRegistry<IQuickFixSupport>('quickFixSupport');
+import {QuickFixRegistry, IQuickFix, IQuickFixSupport} from 'vs/editor/common/modes';
+import {IModelService} from 'vs/editor/common/services/modelService';
 
 export interface IQuickFix2 extends IQuickFix {
 	support: IQuickFixSupport;
@@ -29,7 +26,7 @@ export function getQuickFixes(model: IModel, range: IRange): TPromise<IQuickFix2
 	const promises = QuickFixRegistry.all(model).map(support => {
 		return support.getQuickFixes(model.getAssociatedResource(), range).then(result => {
 			if (!Array.isArray(result)) {
-				return
+				return;
 			}
 			for (let fix of result) {
 				quickFixes.push({

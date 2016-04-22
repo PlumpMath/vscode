@@ -2,25 +2,24 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+
+'use strict';
+
 import nls = require('vs/nls');
 import Objects = require('vs/base/common/objects');
 import Json = require('vs/base/common/json');
 import http = require('vs/base/common/http');
-import {IJSONSchema} from 'vs/base/common/jsonSchema';
+import {IJSONSchema, IJSONSchemaMap} from 'vs/base/common/jsonSchema';
 import Strings = require('vs/base/common/strings');
 import URI from 'vs/base/common/uri';
 import Types = require('vs/base/common/types');
 import Parser = require('vs/languages/json/common/parser/jsonParser');
 import WinJS = require('vs/base/common/winjs.base');
-import EditorCommon = require('vs/editor/common/editorCommon');
-import EventEmitter = require('vs/base/common/eventEmitter');
 import {IResourceService, ResourceEvents, IResourceChangedEvent} from 'vs/editor/common/services/resourceService';
 import {IRequestService} from 'vs/platform/request/common/request';
 import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 import {ISchemaContributions} from 'vs/platform/jsonschemas/common/jsonContributionRegistry';
 import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
-
-'use strict';
 
 export interface IJSONSchemaService {
 
@@ -117,7 +116,7 @@ class SchemaHandle implements ISchemaHandle {
 		this.service = service;
 		this.url = url;
 		if (unresolvedSchemaContent) {
-			this.unresolvedSchema = WinJS.Promise.as(new UnresolvedSchema(unresolvedSchemaContent));
+			this.unresolvedSchema = WinJS.TPromise.as(new UnresolvedSchema(unresolvedSchemaContent));
 		}
 	}
 
@@ -267,25 +266,6 @@ export class JSONSchemaService implements IJSONSchemaService {
 				this.contributionSchemas[id] = this.addSchemaHandle(id, schemas[id]);
 			}
 		}
-		if (schemaContributions.schemaAssociations) {
-			var schemaAssociations = schemaContributions.schemaAssociations;
-			for (let pattern in schemaAssociations) {
-				var associations = schemaAssociations[pattern];
-				if (this.contextService) {
-					let env = this.contextService.getConfiguration().env;
-					if (env) {
-						pattern = pattern.replace(/%APP_SETTINGS_HOME%/, URI.file(env.appSettingsHome).toString());
-					}
-				}
-				this.contributionAssociations[pattern] = associations;
-
-				var fpa = this.getOrAddFilePatternAssociation(pattern);
-				associations.forEach(schemaId => {
-					var id = this.normalizeId(schemaId);
-					fpa.addSchema(id)
-				});
-			}
-		}
 	}
 
 	private addSchemaHandle(id:string, unresolvedSchemaContent?: IJSONSchema) : SchemaHandle {
@@ -399,7 +379,7 @@ export class JSONSchemaService implements IJSONSchemaService {
 				resolveErrors.push(nls.localize('json.schema.invalidref', '$ref \'{0}\' in {1} can not be resolved.', linkPath, linkedSchema.id));
 			}
 			delete node.$ref;
-		}
+		};
 
 		var resolveExternalLink = (node: any, uri: string, linkPath: string): WinJS.Promise => {
 			return this.getOrAddSchemaHandle(uri).getUnresolvedSchema().then(unresolvedSchema => {
@@ -410,41 +390,60 @@ export class JSONSchemaService implements IJSONSchemaService {
 				resolveLink(node, unresolvedSchema.schema, linkPath);
 				return resolveRefs(node, unresolvedSchema.schema);
 			});
-		}
+		};
 
-		var resolveRefs = (node:any, parentSchema: any) : WinJS.Promise => {
-			var toWalk = [ node ];
-			var seen: any[] = [];
+		let resolveRefs = (node: IJSONSchema, parentSchema: IJSONSchema): WinJS.Promise => {
+			let toWalk : IJSONSchema[] = [node];
+			let seen: IJSONSchema[] = [];
 
 			var openPromises: WinJS.Promise[] = [];
 
+			let collectEntries = (...entries: IJSONSchema[]) => {
+				for (let entry of entries) {
+					if (typeof entry === 'object') {
+						toWalk.push(entry);
+					}
+				}
+			};
+			let collectMapEntries = (...maps: IJSONSchemaMap[]) => {
+				for (let map of maps) {
+					if (typeof map === 'object') {
+						for (let key in map) {
+							let entry = map[key];
+							toWalk.push(entry);
+						}
+					}
+				}
+			};
+			let collectArrayEntries = (...arrays: IJSONSchema[][]) => {
+				for (let array of arrays) {
+					if (Array.isArray(array)) {
+						toWalk.push.apply(toWalk, array);
+					}
+				}
+			};
 			while (toWalk.length) {
-				var next = toWalk.pop();
+				let next = toWalk.pop();
 				if (seen.indexOf(next) >= 0) {
 					continue;
 				}
 				seen.push(next);
-				if (Array.isArray(next)) {
-					next.forEach(item => {
-						toWalk.push(item);
-					});
-				} else if (Types.isObject(next)) {
-					if (next.$ref) {
-						var segments = next.$ref.split('#', 2);
-						if (segments[0].length > 0) {
-							openPromises.push(resolveExternalLink(next, segments[0], segments[1]));
-							continue;
-						} else {
-							resolveLink(next, parentSchema, segments[1]);
-						}
-					}
-					for (var key in next) {
-						toWalk.push(next[key]);
+				if (next.$ref) {
+					let segments = next.$ref.split('#', 2);
+					if (segments[0].length > 0) {
+						openPromises.push(resolveExternalLink(next, segments[0], segments[1]));
+						continue;
+					} else {
+						resolveLink(next, parentSchema, segments[1]);
 					}
 				}
+				collectEntries(next.items, next.additionalProperties, next.not);
+				collectMapEntries(next.definitions, next.properties, next.patternProperties, <IJSONSchemaMap> next.dependencies);
+				collectArrayEntries(next.anyOf, next.allOf, next.oneOf, <IJSONSchema[]> next.items);
 			}
+
 			return WinJS.Promise.join(openPromises);
-		}
+		};
 
 		return resolveRefs(schema, schema).then(_ => new ResolvedSchema(schema, resolveErrors));
 	}
@@ -485,7 +484,7 @@ export class JSONSchemaService implements IJSONSchemaService {
 		} else {
 			var combinedSchema: IJSONSchema = {
 				allOf: schemaIds.map(schemaId => ({ $ref: schemaId }))
-			}
+			};
 			return this.addSchemaHandle(combinedSchemaId, combinedSchema);
 		}
 	}

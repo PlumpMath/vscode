@@ -86,7 +86,8 @@ class ExtHostApiCommands {
 			description: 'Execute signature help provider.',
 			args: [
 				{ name: 'uri', description: 'Uri of a text document', constraint: URI },
-				{ name: 'position', description: 'Position in a text document', constraint: types.Position }
+				{ name: 'position', description: 'Position in a text document', constraint: types.Position },
+				{ name: 'triggerCharacter', description: '(optional) Trigger signature help when the user types the character, like `,` or `(`', constraint: value => value === void 0 || typeof value === 'string' }
 			],
 			returns: 'A promise that resolves to SignatureHelp.'
 		});
@@ -101,7 +102,8 @@ class ExtHostApiCommands {
 			description: 'Execute completion item provider.',
 			args: [
 				{ name: 'uri', description: 'Uri of a text document', constraint: URI },
-				{ name: 'position', description: 'Position in a text document', constraint: types.Position }
+				{ name: 'position', description: 'Position in a text document', constraint: types.Position },
+				{ name: 'triggerCharacter', description: '(optional) Trigger completion when the user types the character, like `,` or `(`', constraint: value => value === void 0 || typeof value === 'string' }
 			],
 			returns: 'A promise that resolves to a CompletionList-instance.'
 		});
@@ -111,14 +113,14 @@ class ExtHostApiCommands {
 				{ name: 'uri', description: 'Uri of a text document', constraint: URI },
 				{ name: 'range', description: 'Range in a text document', constraint: types.Range }
 			],
-			returns: 'A promise that resolves to an array of CompletionItem-instances.'
+			returns: 'A promise that resolves to an array of Command-instances.'
 		});
 		this._register('vscode.executeCodeLensProvider', this._executeCodeLensProvider, {
 			description: 'Execute completion item provider.',
 			args: [
 				{ name: 'uri', description: 'Uri of a text document', constraint: URI }
 			],
-			returns: 'A promise that resolves to an array of Commands.'
+			returns: 'A promise that resolves to an array of CodeLens-instances.'
 		});
 		this._register('vscode.executeFormatDocumentProvider', this._executeFormatDocumentProvider, {
 			description: 'Execute document format provider.',
@@ -154,10 +156,29 @@ class ExtHostApiCommands {
 				typeof position === 'number' ? typeConverters.fromViewColumn(position) : void 0);
 
 		}, {
-			description: 'Preview an html document.',
+				description: `
+					Render the html of the resource in an editor view.
+
+					Links contained in the document will be handled by VS Code whereby it supports file-resources and virtual resources
+					as well as triggering commands using the 'command'-scheme.
+				`,
 			args: [
-				{ name: 'uri', description: 'Uri of the document to preview.', constraint: URI },
+				{ name: 'uri', description: 'Uri of the resource to preview.', constraint: value => value instanceof URI || typeof value === 'string' },
 				{ name: 'column', description: '(optional) Column in which to preview.' },
+			]
+		});
+
+		this._register('vscode.openFolder', (uri?: URI, newWindow?: boolean) => {
+			if (!uri) {
+				return this._commands.executeCommand('_workbench.ipc', 'vscode:openFolderPicker', [newWindow]);
+			}
+
+			return this._commands.executeCommand('_workbench.ipc', 'vscode:windowOpen', [[uri.fsPath], newWindow]);
+		}, {
+			description: 'Open a folder in the current window or new window depending on the newWindow argument. Note that opening in the same window will shutdown the current extension host process and start a new one on the given folder unless the newWindow parameter is set to true.',
+			args: [
+				{ name: 'uri', description: '(optional) Uri of the folder to open. If not provided, a native dialog will ask the user for the folder', constraint: value => value === void 0 || value instanceof URI },
+				{ name: 'newWindow', description: '(optional) Wether to open the folder in a new window or the same. Defaults to opening in the same window.', constraint: value => value === void 0 || typeof value === 'boolean' }
 			]
 		});
 	}
@@ -271,17 +292,15 @@ class ExtHostApiCommands {
 			position: position && typeConverters.fromPosition(position),
 			triggerCharacter
 		};
-		return this._commands.executeCommand<modes.ISuggestResult[][]>('_executeCompletionItemProvider', args).then(value => {
+		return this._commands.executeCommand<modes.ISuggestResult[]>('_executeCompletionItemProvider', args).then(value => {
 			if (value) {
 				let items: types.CompletionItem[] = [];
 				let incomplete: boolean;
-				for (let group of value) {
-					for (let suggestions of group) {
-						incomplete = suggestions.incomplete || incomplete;
-						for (let suggestion of suggestions.suggestions) {
-							const item = typeConverters.Suggest.to(suggestions, position, suggestion);
-							items.push(item);
-						}
+				for (let suggestions of value) {
+					incomplete = suggestions.incomplete || incomplete;
+					for (let suggestion of suggestions.suggestions) {
+						const item = typeConverters.Suggest.to(suggestions, position, suggestion);
+						items.push(item);
 					}
 				}
 				return new types.CompletionList(<any>items, incomplete);

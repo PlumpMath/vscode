@@ -5,15 +5,16 @@
 
 import path = require('path');
 import nls = require('vs/nls');
-import { Promise, TPromise } from 'vs/base/common/winjs.base';
+import { TPromise } from 'vs/base/common/winjs.base';
+import strings = require('vs/base/common/strings');
+import Event, { Emitter } from 'vs/base/common/event';
 import objects = require('vs/base/common/objects');
 import uri from 'vs/base/common/uri';
-import { schemas } from 'vs/base/common/network';
+import { Schemas } from 'vs/base/common/network';
 import paths = require('vs/base/common/paths');
-import Severity from 'vs/base/common/severity';
 import { IJSONSchema } from 'vs/base/common/jsonSchema';
 import editor = require('vs/editor/common/editorCommon');
-import pluginsRegistry = require('vs/platform/plugins/common/pluginsRegistry');
+import extensionsRegistry = require('vs/platform/extensions/common/extensionsRegistry');
 import platform = require('vs/platform/platform');
 import jsonContributionRegistry = require('vs/platform/jsonschemas/common/jsonContributionRegistry');
 import { IConfigurationService } from 'vs/platform/configuration/common/configuration';
@@ -28,13 +29,13 @@ import { IQuickOpenService } from 'vs/workbench/services/quickopen/common/quickO
 
 // debuggers extension point
 
-export var debuggersExtPoint = pluginsRegistry.PluginsRegistry.registerExtensionPoint<debug.IRawAdapter[]>('debuggers', {
+export var debuggersExtPoint = extensionsRegistry.ExtensionsRegistry.registerExtensionPoint<debug.IRawAdapter[]>('debuggers', {
 	description: nls.localize('vscode.extension.contributes.debuggers', 'Contributes debug adapters.'),
 	type: 'array',
-	default: [{ type: '', extensions: [] }],
+	defaultSnippets: [{ body: [{ type: '', extensions: [] }] }],
 	items: {
 		type: 'object',
-		default: { type: '', program: '', runtime: '', enableBreakpointsFor: { languageIds: [ '' ] } },
+		defaultSnippets: [{ body: { type: '', program: '', runtime: '', enableBreakpointsFor: { languageIds: [ '' ] } } }],
 		properties: {
 			type: {
 				description: nls.localize('vscode.extension.contributes.debuggers.type', "Unique identifier for this debug adapter."),
@@ -137,18 +138,18 @@ const schema: IJSONSchema = {
 			}
 		}
 	}
-}
+};
 
 const jsonRegistry = <jsonContributionRegistry.IJSONContributionRegistry>platform.Registry.as(jsonContributionRegistry.Extensions.JSONContribution);
 jsonRegistry.registerSchema(schemaId, schema);
-jsonRegistry.addSchemaFileAssociation('/.vscode/launch.json', schemaId);
 
-export class ConfigurationManager {
+export class ConfigurationManager implements debug.IConfigurationManager {
 
-	private configuration: debug.IConfig;
+	public configuration: debug.IConfig;
 	private systemVariables: SystemVariables;
 	private adapters: Adapter[];
 	private allModeIdsForBreakpoints: { [key: string]: boolean };
+	private _onDidConfigurationChange: Emitter<string>;
 
 	constructor(
 		configName: string,
@@ -159,6 +160,7 @@ export class ConfigurationManager {
 		@IConfigurationService private configurationService: IConfigurationService,
 		@IQuickOpenService private quickOpenService: IQuickOpenService
 	) {
+		this._onDidConfigurationChange = new Emitter<string>();
 		this.systemVariables = this.contextService.getWorkspace() ? new SystemVariables(this.editorService, this.contextService) : null;
 		this.setConfiguration(configName);
 		this.adapters = [];
@@ -195,9 +197,11 @@ export class ConfigurationManager {
 						this.adapters.push(adapter);
 					}
 
-					adapter.enableBreakpointsFor.languageIds.forEach(modeId => {
-						this.allModeIdsForBreakpoints[modeId] = true;
-					});
+					if (adapter.enableBreakpointsFor) {
+						adapter.enableBreakpointsFor.languageIds.forEach(modeId => {
+							this.allModeIdsForBreakpoints[modeId] = true;
+						});
+					}
 				});
 			});
 
@@ -206,25 +210,25 @@ export class ConfigurationManager {
 			this.adapters.forEach(adapter => {
 				const schemaAttributes = adapter.getSchemaAttributes();
 				if (schemaAttributes) {
-					schema.properties['configurations'].items.oneOf.push(...schemaAttributes);
+					(<IJSONSchema> schema.properties['configurations'].items).oneOf.push(...schemaAttributes);
 				}
 			});
 		});
 	}
 
-	public getConfiguration(): debug.IConfig {
-		return this.configuration;
+	public get onDidConfigurationChange(): Event<string> {
+		return this._onDidConfigurationChange.event;
 	}
 
-	public getConfigurationName(): string {
+	public get configurationName(): string {
 		return this.configuration ? this.configuration.name : null;
 	}
 
-	public getAdapter(): Adapter {
-		return this.adapters.filter(adapter => adapter.type === this.configuration.type).pop();
+	public get adapter(): Adapter {
+		return this.adapters.filter(adapter => strings.equalsIgnoreCase(adapter.type, this.configuration.type)).pop();
 	}
 
-	public setConfiguration(name: string): Promise {
+	public setConfiguration(name: string): TPromise<void> {
 		return this.loadLaunchConfig().then(config => {
 			if (!config || !config.configurations) {
 				this.configuration = null;
@@ -239,17 +243,12 @@ export class ConfigurationManager {
 			if (this.configuration) {
 				if (this.systemVariables) {
 					Object.keys(this.configuration).forEach(key => {
-						this.configuration[key] = this.systemVariables.resolve(this.configuration[key]);
+						this.configuration[key] = this.systemVariables.resolveAny(this.configuration[key]);
 					});
 				}
-
 				this.configuration.debugServer = config.debugServer;
-				this.configuration.outDir = this.resolvePath(this.configuration.outDir);
-				this.configuration.program = this.resolvePath(this.configuration.program);
-				this.configuration.cwd = this.resolvePath(this.configuration.cwd || '.');
-				this.configuration.runtimeExecutable = this.resolvePath(this.configuration.runtimeExecutable);
 			}
-		});
+		}).then(() => this._onDidConfigurationChange.fire(this.configurationName));
 	}
 
 	public openConfigFile(sideBySide: boolean): TPromise<boolean> {
@@ -281,24 +280,28 @@ export class ConfigurationManager {
 	}
 
 	private getInitialConfigFileContent(): TPromise<string> {
-		return this.quickOpenService.pick(this.adapters, { placeHolder: nls.localize('selectDebug', "Select Debug Environment") })
+		return this.quickOpenService.pick(this.adapters, { placeHolder: nls.localize('selectDebug', "Select Environment") })
 		.then(adapter => {
 			if (!adapter) {
 				return null;
 			}
 
-			return this.massageInitialConfigurations(adapter).then(() =>
-				JSON.stringify({
-					version: '0.2.0',
-					configurations: adapter.initialConfigurations ? adapter.initialConfigurations : []
-				}, null, '\t')
-			)
+			return this.massageInitialConfigurations(adapter).then(() => {
+				let editorConfig = this.configurationService.getConfiguration<any>();
+				return JSON.stringify(
+					{
+						version: '0.2.0',
+						configurations: adapter.initialConfigurations ? adapter.initialConfigurations : []
+					},
+					null,
+					editorConfig.editor.insertSpaces ? strings.repeat(' ', editorConfig.editor.tabSize) : '\t');
+			});
 		});
 	}
 
-	private massageInitialConfigurations(adapter: Adapter): Promise {
+	private massageInitialConfigurations(adapter: Adapter): TPromise<void> {
 		if (!adapter || !adapter.initialConfigurations || adapter.type !== 'node') {
-			return Promise.as(true);
+			return TPromise.as(undefined);
 		}
 
 		// check package.json for 'main' or 'scripts' so we generate a more pecise 'program' attribute in launch.json.
@@ -319,7 +322,7 @@ export class ConfigurationManager {
 			adapter.initialConfigurations.forEach(config => {
 				if (program && config.program) {
 					if (!path.isAbsolute(program)) {
-						program = path.join('${workspaceRoot}', program);
+						program = paths.join('${workspaceRoot}', program);
 					}
 
 					config.program = program;
@@ -328,11 +331,8 @@ export class ConfigurationManager {
 		});
 	}
 
-	public canSetBreakpointsIn(model: editor.IModel, lineNumber: number): boolean {
-		if (model.getLineLastNonWhitespaceColumn(lineNumber) === 0) {
-			return false;
-		}
-		if (model.getAssociatedResource().scheme === schemas.inMemory) {
+	public canSetBreakpointsIn(model: editor.IModel): boolean {
+		if (model.getAssociatedResource().scheme === Schemas.inMemory) {
 			return false;
 		}
 
@@ -342,18 +342,7 @@ export class ConfigurationManager {
 		return !!this.allModeIdsForBreakpoints[modeId];
 	}
 
-	private resolvePath(p: string): string {
-		if (!p) {
-			return null;
-		}
-		if (path.isAbsolute(p)) {
-			return paths.normalize(p, true);
-		}
-
-		return paths.normalize(uri.file(paths.join(this.contextService.getWorkspace().resource.fsPath, p)).fsPath, true);
-	}
-
 	public loadLaunchConfig(): TPromise<debug.IGlobalConfig> {
-		return this.configurationService.loadConfiguration('launch');
+		return TPromise.as(this.configurationService.getConfiguration<debug.IGlobalConfig>('launch'));
 	}
 }

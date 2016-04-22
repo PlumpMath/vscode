@@ -262,7 +262,7 @@ export class ActionItem extends BaseActionItem {
 			title = this.getAction().label;
 
 			if (this.options.keybinding) {
-				title = nls.localize('titleLabel', "{0} ({1})", title, this.options.keybinding);
+				title = nls.localize({ key: 'titleLabel', comment: ['action title', 'action keybinding']}, "{0} ({1})", title, this.options.keybinding);
 			}
 		}
 
@@ -480,9 +480,9 @@ export class ActionBar extends EventEmitter implements IActionRunner {
 		});
 
 		this.focusTracker = DOM.trackFocus(this.domNode);
-		this.focusTracker.addBlurListener((e: Event) => {
+		this.focusTracker.addBlurListener(() => {
 			if (document.activeElement === this.domNode || !DOM.isAncestor(document.activeElement, this.domNode)) {
-				this.emit(DOM.EventType.BLUR, e);
+				this.emit(DOM.EventType.BLUR, {});
 				this.focusedItem = undefined;
 			}
 		});
@@ -712,7 +712,7 @@ export class ActionBar extends EventEmitter implements IActionRunner {
 			this.focusTracker = null;
 		}
 
-		this.toDispose = lifecycle.disposeAll(this.toDispose);
+		this.toDispose = lifecycle.dispose(this.toDispose);
 
 		this.getContainer().destroy();
 
@@ -724,7 +724,7 @@ export class SelectActionItem extends BaseActionItem {
 	private select: HTMLSelectElement;
 	private options: string[];
 	private selected: number;
-	private toDispose: lifecycle.IDisposable[];
+	protected toDispose: lifecycle.IDisposable[];
 
 	constructor(ctx: any, action: IAction, options: string[], selected: number) {
 		super(ctx, action);
@@ -749,8 +749,12 @@ export class SelectActionItem extends BaseActionItem {
 
 	private registerListeners(): void {
 		this.toDispose.push(DOM.addStandardDisposableListener(this.select, 'change', (e) => {
-			this.actionRunner.run(this._action, e.target.value).done();
+			this.actionRunner.run(this._action, this.getActionContext(e.target.value)).done();
 		}));
+	}
+
+	protected getActionContext(option: string) {
+		return option;
 	}
 
 	public focus(): void {
@@ -775,7 +779,7 @@ export class SelectActionItem extends BaseActionItem {
 		this.select.options.length = 0;
 
 		this.options.forEach((option) => {
-			this.select.options.add(this.createOption(option));
+			this.select.add(this.createOption(option));
 		});
 
 		if (this.selected >= 0) {
@@ -792,7 +796,7 @@ export class SelectActionItem extends BaseActionItem {
 	}
 
 	public dispose(): void {
-		this.toDispose = lifecycle.disposeAll(this.toDispose);
+		this.toDispose = lifecycle.dispose(this.toDispose);
 
 		super.dispose();
 	}

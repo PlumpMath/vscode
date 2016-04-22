@@ -18,7 +18,6 @@ import {IConfigurationService, IConfigurationServiceEvent, ConfigurationServiceE
 import {BaseRequestService} from 'vs/platform/request/common/baseRequestService';
 import rawHttpService = require('vs/workbench/services/request/node/rawHttpService');
 import {ITelemetryService} from 'vs/platform/telemetry/common/telemetry';
-import { IThreadSynchronizableObject} from 'vs/platform/thread/common/thread';
 import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 
 interface IRawHttpService {
@@ -30,7 +29,7 @@ interface IXHRFunction {
 	(options: http.IXHROptions): TPromise<http.IXHRResponse>;
 }
 
-export class RequestService extends BaseRequestService implements IThreadSynchronizableObject<{}> {
+export class RequestService extends BaseRequestService {
 	private callOnDispose: Function[];
 
 	constructor(
@@ -52,10 +51,10 @@ export class RequestService extends BaseRequestService implements IThreadSynchro
 	private _rawHttpServicePromise: TPromise<IRawHttpService>;
 	private get rawHttpServicePromise(): TPromise<IRawHttpService> {
 		if (!this._rawHttpServicePromise) {
-			this._rawHttpServicePromise = this.configurationService.loadConfiguration().then((configuration: any) => {
-				rawHttpService.configure(configuration.http && configuration.http.proxy, configuration.http.proxyStrictSSL);
-				return rawHttpService;
-			});
+			const configuration = this.configurationService.getConfiguration<any>();
+			rawHttpService.configure(configuration.http && configuration.http.proxy, configuration.http.proxyStrictSSL);
+
+			return TPromise.as(rawHttpService);
 		}
 
 		return this._rawHttpServicePromise;
@@ -63,13 +62,6 @@ export class RequestService extends BaseRequestService implements IThreadSynchro
 
 	public dispose(): void {
 		lifecycle.cAll(this.callOnDispose);
-	}
-
-	/**
-	 * IThreadSynchronizableObject Id. Must match id in WorkerRequestService.
-	 */
-	public getId(): string {
-		return 'NativeRequestService';
 	}
 
 	public makeRequest(options: http.IXHROptions): TPromise<http.IXHRResponse> {
@@ -96,7 +88,7 @@ export class RequestService extends BaseRequestService implements IThreadSynchro
 	 * Make a cross origin request using NodeJS.
 	 * Note: This method is also called from workers.
 	 */
-	public makeCrossOriginRequest(options: http.IXHROptions): TPromise<http.IXHRResponse> {
+	protected makeCrossOriginRequest(options: http.IXHROptions): TPromise<http.IXHRResponse> {
 		let timerVar: timer.ITimerEvent = timer.nullEvent;
 		return this.rawHttpServicePromise.then((rawHttpService: IRawHttpService) => {
 			return async.always(rawHttpService.xhr(options), ((xhr: http.IXHRResponse) => {
@@ -112,19 +104,20 @@ export class RequestService extends BaseRequestService implements IThreadSynchro
 // Configuration
 let confRegistry = <IConfigurationRegistry>platform.Registry.as(Extensions.Configuration);
 confRegistry.registerConfiguration({
-	'id': 'http',
-	'order': 9,
-	'title': nls.localize('httpConfigurationTitle', "HTTP configuration"),
-	'type': 'object',
-	'properties': {
+	id: 'http',
+	order: 9,
+	title: nls.localize('httpConfigurationTitle', "HTTP configuration"),
+	type: 'object',
+	properties: {
 		'http.proxy': {
-			'type': 'string',
-			'description': nls.localize('proxy', "The proxy setting to use. If not set will be taken from the http_proxy and https_proxy environment variables")
+			type: 'string',
+			pattern: '^https?://[^:]+(:\\d+)?$',
+			description: nls.localize('proxy', "The proxy setting to use. If not set will be taken from the http_proxy and https_proxy environment variables")
 		},
 		'http.proxyStrictSSL': {
-			'type': 'boolean',
-			'default': true,
-			'description': nls.localize('strictSSL', "Whether the proxy server certificate should be verified against the list of supplied CAs.")
+			type: 'boolean',
+			default: true,
+			description: nls.localize('strictSSL', "Whether the proxy server certificate should be verified against the list of supplied CAs.")
 		}
 	}
 });

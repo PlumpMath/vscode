@@ -8,6 +8,15 @@ else
 	ROOT=$(dirname $(dirname $(readlink -f $0)))
 fi
 
+# Node modules
+test -d node_modules || ./scripts/npm.sh install
+
+# Get electron
+./node_modules/.bin/gulp electron
+
+# Build
+test -d out || ./node_modules/.bin/gulp compile
+
 # Unit Tests
 if [[ "$OSTYPE" == "darwin"* ]]; then
 	cd $ROOT ; ulimit -n 4096 ; ATOM_SHELL_INTERNAL_RUN_AS_NODE=1 \
@@ -17,9 +26,4 @@ else
 	cd $ROOT ; ATOM_SHELL_INTERNAL_RUN_AS_NODE=1 \
 		./.build/electron/electron \
 		node_modules/mocha/bin/_mocha $*
-fi
-
-# Integration Tests
-if [[ "$SKIP_INTEGRATION_TESTS" == "" ]]; then
-	./scripts/code.sh $ROOT/extensions/vscode-api-tests/testWorkspace --extensionDevelopmentPath=$ROOT/extensions/vscode-api-tests --extensionTestsPath=$ROOT/extensions/vscode-api-tests/out
 fi

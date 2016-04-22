@@ -10,7 +10,7 @@ import {Action, IAction} from 'vs/base/common/actions';
 import {ActionItem, BaseActionItem, Separator} from 'vs/base/browser/ui/actionbar/actionbar';
 import {Scope, IActionBarRegistry, Extensions as ActionBarExtensions, ActionBarContributor} from 'vs/workbench/browser/actionBarRegistry';
 import {IEditorInputActionContext, IEditorInputAction, EditorInputActionContributor} from 'vs/workbench/browser/parts/editor/baseEditor';
-import {AddToWorkingFiles, FocusWorkingFiles, OpenPreviousWorkingFile, OpenNextWorkingFile, CloseAllFilesAction, CloseFileAction, GlobalCompareResourcesAction, GlobalNewFolderAction, RevertFileAction, SaveFilesAction, SaveAllAction, SaveFileAction, keybindingForAction, MoveFileToTrashAction, TriggerRenameFileAction, PasteFileAction, CopyFileAction, SelectResourceForCompareAction, CompareResourcesAction, NewFolderAction, NewFileAction, OpenToSideAction} from 'vs/workbench/parts/files/browser/fileActions';
+import {AddToWorkingFiles, FocusWorkingFiles, FocusFilesExplorer, OpenPreviousWorkingFile, OpenNextWorkingFile, CloseAllFilesAction, CloseFileAction, CloseOtherFilesAction, GlobalCompareResourcesAction, GlobalNewFileAction, GlobalNewFolderAction, RevertFileAction, SaveFilesAction, SaveAllAction, SaveFileAction, keybindingForAction, MoveFileToTrashAction, TriggerRenameFileAction, PasteFileAction, CopyFileAction, SelectResourceForCompareAction, CompareResourcesAction, NewFolderAction, NewFileAction, ReopenClosedFileAction, OpenToSideAction, ShowActiveFileInExplorer} from 'vs/workbench/parts/files/browser/fileActions';
 import {RevertLocalChangesAction, AcceptLocalChangesAction, ConflictResolutionDiffEditorInput} from 'vs/workbench/parts/files/browser/saveErrorHandler';
 import {SyncActionDescriptor} from 'vs/platform/actions/common/actions';
 import {IWorkbenchActionRegistry, Extensions as ActionExtensions} from 'vs/workbench/common/actionRegistry';
@@ -108,7 +108,7 @@ class FilesViewerActionContributor extends ActionBarContributor {
 		let curOrder = 10;
 		for (let i = 0; i < actions.length; i++) {
 			let action = <any>actions[i];
-			if (!action.order) { // TODO@Ben order should be a property in another place where the action gets bound to the UI
+			if (!action.order) {
 				curOrder += 10;
 				action.order = curOrder;
 			} else {
@@ -162,15 +162,20 @@ actionBarRegistry.registerActionBarContributor(Scope.EDITOR, ConflictResolutionA
 const category = nls.localize('filesCategory', "Files");
 
 let registry = <IWorkbenchActionRegistry>Registry.as(ActionExtensions.WorkbenchActions);
-registry.registerWorkbenchAction(new SyncActionDescriptor(SaveFileAction, SaveFileAction.ID, SaveFileAction.LABEL, { primary: KeyMod.CtrlCmd | KeyCode.KEY_S }), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(SaveAllAction, SaveAllAction.ID, SaveAllAction.LABEL), category);
+registry.registerWorkbenchAction(new SyncActionDescriptor(SaveFileAction, SaveFileAction.ID, SaveFileAction.LABEL, { primary: KeyMod.CtrlCmd | KeyCode.KEY_S }), category, ['save', 'file']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(SaveAllAction, SaveAllAction.ID, SaveAllAction.LABEL), category, ['save', 'all', 'files']);
 registry.registerWorkbenchAction(new SyncActionDescriptor(SaveFilesAction, SaveFilesAction.ID, null /* only for programmatic trigger */));
-registry.registerWorkbenchAction(new SyncActionDescriptor(RevertFileAction, RevertFileAction.ID, RevertFileAction.LABEL), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(GlobalNewFolderAction, GlobalNewFolderAction.ID, GlobalNewFolderAction.LABEL), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(GlobalCompareResourcesAction, GlobalCompareResourcesAction.ID, GlobalCompareResourcesAction.LABEL), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(CloseFileAction, CloseFileAction.ID, CloseFileAction.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.KEY_W) }), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(CloseAllFilesAction, CloseAllFilesAction.ID, CloseAllFilesAction.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyMod.CtrlCmd | KeyCode.KEY_W) }), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(OpenNextWorkingFile, OpenNextWorkingFile.ID, OpenNextWorkingFile.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.DownArrow) }), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(OpenPreviousWorkingFile, OpenPreviousWorkingFile.ID, OpenPreviousWorkingFile.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.UpArrow) }), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(AddToWorkingFiles, AddToWorkingFiles.ID, AddToWorkingFiles.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.Enter) }), category);
-registry.registerWorkbenchAction(new SyncActionDescriptor(FocusWorkingFiles, FocusWorkingFiles.ID, FocusWorkingFiles.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.KEY_E) }), category);
+registry.registerWorkbenchAction(new SyncActionDescriptor(RevertFileAction, RevertFileAction.ID, RevertFileAction.LABEL), category, ['revert', 'file']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(GlobalNewFileAction, GlobalNewFileAction.ID, GlobalNewFileAction.LABEL), category, ['new', 'file']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(GlobalNewFolderAction, GlobalNewFolderAction.ID, GlobalNewFolderAction.LABEL), category, ['new', 'folder']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(GlobalCompareResourcesAction, GlobalCompareResourcesAction.ID, GlobalCompareResourcesAction.LABEL), category, ['compare', 'files']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(CloseFileAction, CloseFileAction.ID, CloseFileAction.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.KEY_W) }), category, ['close', 'file']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(CloseOtherFilesAction, CloseOtherFilesAction.ID, CloseOtherFilesAction.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_W) }), category, ['close', 'other', 'files']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(CloseAllFilesAction, CloseAllFilesAction.ID, CloseAllFilesAction.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyMod.CtrlCmd | KeyCode.KEY_W) }), category, ['close', 'all', 'files']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(ReopenClosedFileAction, ReopenClosedFileAction.ID, ReopenClosedFileAction.LABEL, { primary: KeyMod.CtrlCmd | KeyMod.Shift | KeyCode.KEY_T }), category, ['reopen', 'open', 'closed', 'file']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(OpenNextWorkingFile, OpenNextWorkingFile.ID, OpenNextWorkingFile.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.DownArrow) }), category, ['open', 'next', 'working', 'file']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(OpenPreviousWorkingFile, OpenPreviousWorkingFile.ID, OpenPreviousWorkingFile.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.UpArrow) }), category, ['open', 'previous', 'working', 'file']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(AddToWorkingFiles, AddToWorkingFiles.ID, AddToWorkingFiles.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.Enter) }), category, ['add', 'to', 'working', 'files']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(FocusWorkingFiles, FocusWorkingFiles.ID, FocusWorkingFiles.LABEL, { primary: KeyMod.chord(KeyMod.CtrlCmd | KeyCode.KEY_K, KeyCode.KEY_E) }), category, ['focus', 'working', 'files']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(FocusFilesExplorer, FocusFilesExplorer.ID, FocusFilesExplorer.LABEL), category, ['focus', 'files', 'explorer']);
+registry.registerWorkbenchAction(new SyncActionDescriptor(ShowActiveFileInExplorer, ShowActiveFileInExplorer.ID, ShowActiveFileInExplorer.LABEL), category, ['show', 'active', 'file', 'explorer']);

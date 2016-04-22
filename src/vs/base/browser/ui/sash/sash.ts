@@ -6,9 +6,10 @@
 'use strict';
 
 import 'vs/css!./sash';
-import {IDisposable, disposeAll} from 'vs/base/common/lifecycle';
+import {IDisposable, dispose} from 'vs/base/common/lifecycle';
 import {Builder, $} from 'vs/base/browser/builder';
 import {isIPad} from 'vs/base/browser/browser';
+import {isMacintosh} from 'vs/base/common/platform';
 import types = require('vs/base/common/types');
 import DOM = require('vs/base/browser/dom');
 import {Gesture, EventType, GestureEvent} from 'vs/base/browser/touch';
@@ -32,10 +33,8 @@ export interface IHorizontalSashLayoutProvider extends ISashLayoutProvider {
 export interface ISashEvent {
 	startX: number;
 	currentX: number;
-	instantDiffX: number;
 	startY: number;
 	currentY: number;
-	instantDiffY: number;
 }
 
 export interface ISashOptions {
@@ -63,13 +62,18 @@ export class Sash extends EventEmitter {
 
 		this.$e = $('.monaco-sash').appendTo(container);
 
+		if (isMacintosh) {
+			this.$e.addClass('mac');
+		}
+
 		this.gesture = new Gesture(this.$e.getHTMLElement());
 
-		this.$e.on('mousedown', (e: MouseEvent) => { this.onMouseDown(e); });
+		this.$e.on(DOM.EventType.MOUSE_DOWN, (e: MouseEvent) => { this.onMouseDown(e); });
+		this.$e.on(DOM.EventType.DBLCLICK, (e: MouseEvent) => { this.emit('reset', e); });
 		this.$e.on(EventType.Start, (e: GestureEvent) => { this.onTouchStart(e); });
 
 		this.orientation = options.orientation || Orientation.VERTICAL;
-		this.$e.addClass(this.orientation === Orientation.HORIZONTAL ? 'horizontal' : 'vertical');
+		this.$e.addClass(this.getOrientation());
 
 		this.size = options.baseSize || 5;
 
@@ -93,6 +97,10 @@ export class Sash extends EventEmitter {
 		return this.$e.getHTMLElement();
 	}
 
+	private getOrientation(): 'horizontal' | 'vertical' {
+		return this.orientation === Orientation.HORIZONTAL ? 'horizontal' : 'vertical';
+	}
+
 	private onMouseDown(e: MouseEvent): void {
 		DOM.EventHelper.stop(e, false);
 
@@ -107,26 +115,15 @@ export class Sash extends EventEmitter {
 		let startEvent: ISashEvent = {
 			startX: startX,
 			currentX: startX,
-			instantDiffX: 0,
 			startY: startY,
-			currentY: startY,
-			instantDiffY: 0
+			currentY: startY
 		};
 
 		this.$e.addClass('active');
 		this.emit('start', startEvent);
 
-		let overlayDiv = $('div').style({
-			position: 'absolute',
-			top: 0,
-			left: 0,
-			width: '100%',
-			height: '100%',
-			zIndex: 1000000,
-			cursor: this.orientation === Orientation.VERTICAL ? 'ew-resize' : 'ns-resize'
-		});
-
 		let $window = $(window);
+		let containerCssClass = `${this.getOrientation()}-cursor-container${isMacintosh ? '-mac' : ''}`;
 
 		let lastCurrentX = startX;
 		let lastCurrentY = startY;
@@ -138,10 +135,8 @@ export class Sash extends EventEmitter {
 			let event: ISashEvent = {
 				startX: startX,
 				currentX: mouseMoveEvent.posx,
-				instantDiffX: mouseMoveEvent.posx - lastCurrentX,
 				startY: startY,
-				currentY: mouseMoveEvent.posy,
-				instantDiffY: mouseMoveEvent.posy - lastCurrentY
+				currentY: mouseMoveEvent.posy
 			};
 
 			lastCurrentX = mouseMoveEvent.posx;
@@ -154,10 +149,10 @@ export class Sash extends EventEmitter {
 			this.emit('end');
 
 			$window.off('mousemove');
-			overlayDiv.destroy();
+			document.body.classList.remove(containerCssClass);
 		});
 
-		overlayDiv.appendTo(document.body);
+		document.body.classList.add(containerCssClass);
 	}
 
 	private onTouchStart(event: GestureEvent): void {
@@ -171,10 +166,8 @@ export class Sash extends EventEmitter {
 		this.emit('start', {
 			startX: startX,
 			currentX: startX,
-			instantDiffX: 0,
 			startY: startY,
-			currentY: startY,
-			instantDiffY: 0
+			currentY: startY
 		});
 
 		let lastCurrentX = startX;
@@ -185,10 +178,8 @@ export class Sash extends EventEmitter {
 				this.emit('change', {
 					startX: startX,
 					currentX: event.pageX,
-					instantDiffX: event.pageX - lastCurrentX,
 					startY: startY,
-					currentY: event.pageY,
-					instantDiffY: event.pageY - lastCurrentY
+					currentY: event.pageY
 				});
 
 				lastCurrentX = event.pageX;
@@ -198,7 +189,7 @@ export class Sash extends EventEmitter {
 
 		listeners.push(DOM.addDisposableListener(this.$e.getHTMLElement(), EventType.End, (event: GestureEvent) => {
 			this.emit('end');
-			disposeAll(listeners);
+			dispose(listeners);
 		}));
 	}
 

@@ -9,8 +9,6 @@ import nls = require('vs/nls');
 import types = require('vs/base/common/types');
 import {ICodeEditor} from 'vs/editor/browser/editorBrowser';
 import {IEditorOptions, IEditorViewState} from 'vs/editor/common/editorCommon';
-import {DefaultConfig} from 'vs/editor/common/config/defaultConfig';
-import {EditorConfiguration} from 'vs/editor/common/config/commonEditorConfig';
 import {TextEditorOptions, EditorModel, EditorInput, EditorOptions} from 'vs/workbench/common/editor';
 import {BaseTextEditorModel} from 'vs/workbench/common/editor/textEditorModel';
 import {UntitledEditorInput} from 'vs/workbench/common/editor/untitledEditorInput';
@@ -25,6 +23,7 @@ import {IInstantiationService} from 'vs/platform/instantiation/common/instantiat
 import {IMessageService} from 'vs/platform/message/common/message';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
 import {IModeService} from 'vs/editor/common/services/modeService';
+import {IThemeService} from 'vs/workbench/services/themes/common/themeService';
 
 /**
  * An editor implementation that is capable of showing string inputs or promise inputs that resolve to a string.
@@ -45,9 +44,10 @@ export class StringEditor extends BaseTextEditor {
 		@IConfigurationService configurationService: IConfigurationService,
 		@IEventService eventService: IEventService,
 		@IWorkbenchEditorService editorService: IWorkbenchEditorService,
-		@IModeService modeService: IModeService
+		@IModeService modeService: IModeService,
+		@IThemeService themeService: IThemeService
 	) {
-		super(StringEditor.ID, telemetryService, instantiationService, contextService, storageService, messageService, configurationService, eventService, editorService, modeService);
+		super(StringEditor.ID, telemetryService, instantiationService, contextService, storageService, messageService, configurationService, eventService, editorService, modeService, themeService);
 
 		this.mapResourceToEditorViewState = Object.create(null);
 

@@ -14,8 +14,7 @@ import types = require('vs/base/common/types');
 import strings = require('vs/base/common/strings');
 import {IContext, Mode, IAutoFocus} from 'vs/base/parts/quickopen/common/quickOpen';
 import {QuickOpenModel, IHighlight} from 'vs/base/parts/quickopen/browser/quickOpenModel';
-import {Extensions as ActionExtensions} from 'vs/workbench/common/actionRegistry';
-import {Extensions as QuickOpenExtensions, QuickOpenHandler, EditorQuickOpenEntryGroup} from 'vs/workbench/browser/quickopen';
+import {QuickOpenHandler, EditorQuickOpenEntryGroup} from 'vs/workbench/browser/quickopen';
 import {QuickOpenAction} from 'vs/workbench/browser/actions/quickOpenAction';
 import {BaseTextEditor} from 'vs/workbench/browser/parts/editor/textEditor';
 import {TextEditorOptions, EditorOptions, EditorInput} from 'vs/workbench/common/editor';
@@ -25,7 +24,8 @@ import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/edito
 import {IQuickOpenService} from 'vs/workbench/services/quickopen/common/quickOpenService';
 import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 import {Position} from 'vs/platform/editor/common/editor';
-import {OutlineRegistry, getOutlineEntries} from 'vs/editor/contrib/quickOpen/common/quickOpen';
+import {getOutlineEntries} from 'vs/editor/contrib/quickOpen/common/quickOpen';
+import {OutlineRegistry} from 'vs/editor/common/modes';
 
 export const GOTO_SYMBOL_PREFIX = '@';
 export const SCOPE_PREFIX = ':';
@@ -217,7 +217,7 @@ class OutlineModel extends QuickOpenModel {
 		const result: { [type: string]: string } = Object.create(null);
 		result['method'] = nls.localize('method', "methods ({0})");
 		result['function'] = nls.localize('function', "functions ({0})");
-		result['constructor'] = <any> nls.localize('_constructor', "constructors ({0})");
+		result['constructor'] = <any>nls.localize('_constructor', "constructors ({0})");
 		result['variable'] = nls.localize('variable', "variables ({0})");
 		result['class'] = nls.localize('class', "classes ({0})");
 		result['interface'] = nls.localize('interface', "interfaces ({0})");
@@ -268,6 +268,10 @@ class SymbolEntry extends EditorQuickOpenEntryGroup {
 
 	public getLabel(): string {
 		return this.name;
+	}
+
+	public getAriaLabel(): string {
+		return nls.localize('entryAriaLabel', "{0}, symbols", this.getLabel());
 	}
 
 	public getIcon(): string {
@@ -419,6 +423,10 @@ export class GotoSymbolHandler extends QuickOpenHandler {
 		return nls.localize('noSymbolsFound', "No symbols found");
 	}
 
+	public getAriaLabel(): string {
+		return nls.localize('gotoSymbolHandlerAriaLabel', "Type to narrow down symbols of the currently active editor.");
+	}
+
 	public canRun(): boolean | string {
 		let canRun = false;
 
@@ -429,7 +437,6 @@ export class GotoSymbolHandler extends QuickOpenHandler {
 			if (model && (<IDiffEditorModel>model).modified && (<IDiffEditorModel>model).original) {
 				model = (<IDiffEditorModel>model).modified; // Support for diff editor models
 			}
-
 
 			if (model && types.isFunction((<ITokenizedModel>model).getMode)) {
 				canRun = OutlineRegistry.has(<IModel>model);

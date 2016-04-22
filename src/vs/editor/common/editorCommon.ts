@@ -4,17 +4,17 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {IEventEmitter, ListenerUnbind} from 'vs/base/common/eventEmitter';
-import Modes = require('vs/editor/common/modes');
-import TokensBinaryEncoding = require('vs/editor/common/model/tokensBinaryEncoding');
-import {IInstantiationService, INewConstructorSignature1, IConstructorSignature2, INewConstructorSignature2} from 'vs/platform/instantiation/common/instantiation';
 import {IAction} from 'vs/base/common/actions';
-import {IHTMLContentElement} from 'vs/base/common/htmlContent';
-import URI from 'vs/base/common/uri';
 import Event from 'vs/base/common/event';
-import {IDisposable} from 'vs/base/common/lifecycle';
-import {TPromise} from 'vs/base/common/winjs.base';
+import {IEventEmitter, ListenerUnbind} from 'vs/base/common/eventEmitter';
+import {IHTMLContentElement} from 'vs/base/common/htmlContent';
 import {KeyCode, KeyMod} from 'vs/base/common/keyCodes';
+import {IDisposable} from 'vs/base/common/lifecycle';
+import URI from 'vs/base/common/uri';
+import {TPromise} from 'vs/base/common/winjs.base';
+import {IInstantiationService, IConstructorSignature1, IConstructorSignature2} from 'vs/platform/instantiation/common/instantiation';
+import {ILineContext, IMode, IModeTransition, IToken} from 'vs/editor/common/modes';
+import {Arrays} from 'vs/editor/common/core/arrays';
 
 export type KeyCode = KeyCode;
 export type KeyMod = KeyMod;
@@ -169,7 +169,7 @@ export enum SelectionDirection {
 	 * The selection starts below where it ends.
 	 */
 	RTL
-};
+}
 
 /**
  * A selection in the editor.
@@ -269,11 +269,26 @@ export function wrappingIndentFromString(wrappingIndent:string): WrappingIndent 
 }
 
 /**
- * Configuration options for the editor. Common between configuring the editor and the options the editor has computed
+ * Configuration options for the editor.
  */
-export interface ICommonEditorOptions {
+export interface IEditorOptions {
 	experimentalScreenReader?: boolean;
 	ariaLabel?: string;
+	/**
+	 * Render vertical lines at the specified columns.
+	 * Defaults to empty array.
+	 */
+	rulers?: number[];
+	/**
+	 * A string containing the word separators used when doing word navigation.
+	 * Defaults to `~!@#$%^&*()-=+[{]}\\|;:\'",.<>/?
+	 */
+	wordSeparators?: string;
+	/**
+	 * Enable Linux primary clipboard.
+	 * Defaults to true.
+	 */
+	selectionClipboard?: boolean;
 	/**
 	 * Control the rendering of line numbers.
 	 * If it is a function, it will be invoked when rendering a line number and the return value will be rendered.
@@ -473,7 +488,12 @@ export interface ICommonEditorOptions {
 	 * Enable the suggestion box to pop-up on trigger characters.
 	 * Defaults to true.
 	 */
-	suggestOnTriggerCharacters?:boolean;
+	suggestOnTriggerCharacters?: boolean;
+	/**
+	 * Accept suggestions on ENTER.
+	 * Defaults to true.
+	 */
+	acceptSuggestionOnEnter?: boolean;
 	/**
 	 * Enable selection highlight.
 	 * Defaults to true.
@@ -490,28 +510,20 @@ export interface ICommonEditorOptions {
 	 */
 	referenceInfos?: boolean;
 	/**
+	 * Enable code folding
+	 * Defaults to true.
+	 */
+	folding?: boolean;
+	/**
 	 * Enable rendering of leading whitespace.
 	 * Defaults to false.
 	 */
 	renderWhitespace?: boolean;
-}
-
-/**
- * Configuration options for the editor.
- */
-export interface IEditorOptions extends ICommonEditorOptions {
 	/**
-	 * Tab size in spaces. This is used for rendering and for editing.
-	 * 'auto' means the model attached to the editor will be scanned and this property will be guessed.
-	 * Defaults to 4.
-	 */
-	tabSize?:any;
-	/**
-	 * Insert spaces instead of tabs when indenting or when auto-indenting.
-	 * 'auto' means the model attached to the editor will be scanned and this property will be guessed.
+	 * Enable rendering of indent guides.
 	 * Defaults to true.
 	 */
-	insertSpaces?:any;
+	indentGuides?: boolean;
 	/**
 	 * The font family
 	 */
@@ -545,6 +557,11 @@ export interface IDiffEditorOptions extends IEditorOptions {
 	 * Defaults to true.
 	 */
 	ignoreTrimWhitespace?: boolean;
+	/**
+	 * Original model should be editable?
+	 * Defaults to false.
+	 */
+	originalEditable?: boolean;
 }
 
 /**
@@ -586,6 +603,9 @@ export interface IEditorWrappingInfo {
  */
 export interface IInternalEditorOptions {
 	experimentalScreenReader: boolean;
+	rulers: number[];
+	wordSeparators: string;
+	selectionClipboard: boolean;
 	ariaLabel: string;
 
 	// ---- Options that are transparent - get no massaging
@@ -599,7 +619,7 @@ export interface IInternalEditorOptions {
 	scrollbar:IInternalEditorScrollbarOptions;
 	overviewRulerLanes:number;
 	cursorBlinking:string;
-	cursorStyle:string;
+	cursorStyle:TextEditorCursorStyle;
 	fontLigatures:boolean;
 	hideCursorInOverviewRuler:boolean;
 	scrollBeyondLastLine:boolean;
@@ -621,11 +641,14 @@ export interface IInternalEditorOptions {
 	iconsInSuggestions:boolean;
 	autoClosingBrackets:boolean;
 	formatOnType:boolean;
-	suggestOnTriggerCharacters:boolean;
+	suggestOnTriggerCharacters: boolean;
+	acceptSuggestionOnEnter: boolean;
 	selectionHighlight:boolean;
 	outlineMarkers: boolean;
 	referenceInfos: boolean;
+	folding: boolean;
 	renderWhitespace: boolean;
+	indentGuides: boolean;
 
 	// ---- Options that are computed
 
@@ -634,8 +657,6 @@ export interface IInternalEditorOptions {
 	stylingInfo: IEditorStyling;
 
 	wrappingInfo: IEditorWrappingInfo;
-
-	indentInfo: IInternalIndentationOptions;
 
 	/**
 	 * Computed width of the container of the editor in px.
@@ -662,6 +683,10 @@ export interface IInternalEditorOptions {
 	 */
 	typicalFullwidthCharacterWidth:number;
 	/**
+	 * Computed width of non breaking space &nbsp;
+	 */
+	spaceWidth:number;
+	/**
 	 * Computed font size.
 	 */
 	fontSize:number;
@@ -672,6 +697,9 @@ export interface IInternalEditorOptions {
  */
 export interface IConfigurationChangedEvent {
 	experimentalScreenReader: boolean;
+	rulers: boolean;
+	wordSeparators: boolean;
+	selectionClipboard: boolean;
 	ariaLabel: boolean;
 
 	// ---- Options that are transparent - get no massaging
@@ -711,19 +739,21 @@ export interface IConfigurationChangedEvent {
 	selectionHighlight: boolean;
 	outlineMarkers: boolean;
 	referenceInfos: boolean;
+	folding: boolean;
 	renderWhitespace: boolean;
+	indentGuides: boolean;
 
 	// ---- Options that are computed
 	layoutInfo: boolean;
 	stylingInfo: boolean;
 	wrappingInfo: boolean;
-	indentInfo: boolean;
 	observedOuterWidth: boolean;
 	observedOuterHeight: boolean;
 	lineHeight: boolean;
 	pageSize: boolean;
 	typicalHalfwidthCharacterWidth: boolean;
 	typicalFullwidthCharacterWidth: boolean;
+	spaceWidth: boolean;
 	fontSize: boolean;
 }
 
@@ -744,18 +774,12 @@ export interface IModeSupportChangedEvent {
 	logicalSelectionSupport:boolean;
 	formattingSupport:boolean;
 	inplaceReplaceSupport:boolean;
-	diffSupport:boolean;
-	dirtyDiffSupport:boolean;
 	emitOutputSupport:boolean;
 	linkSupport:boolean;
 	configSupport:boolean;
-	electricCharacterSupport:boolean;
-	commentsSupport:boolean;
-	characterPairSupport:boolean;
-	tokenTypeClassificationSupport:boolean;
 	quickFixSupport: boolean;
 	codeLensSupport: boolean;
-	onEnterSupport: boolean;
+	richEditSupport: boolean;
 }
 
 /**
@@ -862,7 +886,7 @@ export interface IModelTrackedRange {
 	/**
 	 * Range that this tracked range covers
 	 */
-	range: IRange;
+	range: IEditorRange;
 }
 
 /**
@@ -880,7 +904,7 @@ export interface IModelDecoration {
 	/**
 	 * Range that this decoration covers.
 	 */
-	range: IRange;
+	range: IEditorRange;
 	/**
 	 * Options associated with this decoration.
 	 */
@@ -960,7 +984,7 @@ export interface IWordRange {
 }
 
 export interface ITokenInfo {
-	token: Modes.IToken;
+	token: IToken;
 	lineNumber: number;
 	startColumn: number;
 	endColumn: number;
@@ -981,6 +1005,20 @@ export enum EndOfLinePreference {
 	 * Use the end of line character identified in the text buffer.
 	 */
 	TextDefined = 0,
+	/**
+	 * Use line feed (\n) as the end of line character.
+	 */
+	LF = 1,
+	/**
+	 * Use carriage return and line feed (\r\n) as the end of line character.
+	 */
+	CRLF = 2
+}
+
+/**
+ * The default end of line to use when instantiating models.
+ */
+export enum DefaultEndOfLine {
 	/**
 	 * Use line feed (\n) as the end of line character.
 	 */
@@ -1157,9 +1195,81 @@ export interface ICursorStateComputer {
 /**
  * A token on a line.
  */
-export interface ILineToken {
-	startIndex: number;
-	type: string;
+export class ViewLineToken {
+	public _viewLineTokenTrait: void;
+
+	public startIndex:number;
+	public type:string;
+
+	constructor(startIndex:number, type:string) {
+		this.startIndex = startIndex|0;// @perf
+		this.type = type.replace(/[^a-z0-9\-]/gi, ' ');
+	}
+
+	public equals(other:ViewLineToken): boolean {
+		return (
+			this.startIndex === other.startIndex
+			&& this.type === other.type
+		);
+	}
+
+	public static findIndexInSegmentsArray(arr:ViewLineToken[], desiredIndex: number): number {
+		return Arrays.findIndexInSegmentsArray(arr, desiredIndex);
+	}
+
+	public static equalsArray(a:ViewLineToken[], b:ViewLineToken[]): boolean {
+		let aLen = a.length;
+		let bLen = b.length;
+		if (aLen !== bLen) {
+			return false;
+		}
+		for (let i = 0; i < aLen; i++) {
+			if (!a[i].equals(b[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
+}
+
+/**
+ * A token on a line.
+ */
+export class LineToken {
+	public _lineTokenTrait: void;
+
+	public startIndex:number;
+	public type:string;
+
+	constructor(startIndex:number, type:string) {
+		this.startIndex = startIndex|0;// @perf
+		this.type = type;
+	}
+
+	public equals(other:LineToken): boolean {
+		return (
+			this.startIndex === other.startIndex
+			&& this.type === other.type
+		);
+	}
+
+	public static findIndexInSegmentsArray(arr:LineToken[], desiredIndex: number): number {
+		return Arrays.findIndexInSegmentsArray(arr, desiredIndex);
+	}
+
+	public static equalsArray(a:LineToken[], b:LineToken[]): boolean {
+		let aLen = a.length;
+		let bLen = b.length;
+		if (aLen !== bLen) {
+			return false;
+		}
+		for (let i = 0; i < aLen; i++) {
+			if (!a[i].equals(b[i])) {
+				return false;
+			}
+		}
+		return true;
+	}
 }
 
 export interface ITokensInflatorMap {
@@ -1170,21 +1280,17 @@ export interface ITokensInflatorMap {
 export interface ILineTokensBinaryEncoding {
 	START_INDEX_MASK: number;
 	TYPE_MASK: number;
-	BRACKET_MASK: number;
 	START_INDEX_OFFSET: number;
 	TYPE_OFFSET: number;
-	BRACKET_OFFSET: number;
 
-	deflateArr(map:ITokensInflatorMap, tokens:Modes.IToken[]): number[];
-	inflate(map:ITokensInflatorMap, binaryEncodedToken:number): Modes.IToken;
+	deflateArr(map:ITokensInflatorMap, tokens:IToken[]): number[];
+	inflate(map:ITokensInflatorMap, binaryEncodedToken:number): IToken;
 	getStartIndex(binaryEncodedToken:number): number;
 	getType(map:ITokensInflatorMap, binaryEncodedToken:number): string;
-	getBracket(binaryEncodedToken:number): Modes.Bracket;
-	inflateArr(map:ITokensInflatorMap, binaryEncodedTokens:number[]): Modes.IToken[];
+	inflateArr(map:ITokensInflatorMap, binaryEncodedTokens:number[]): IToken[];
 	findIndexOfOffset(binaryEncodedTokens:number[], offset:number): number;
-	sliceAndInflate(map:ITokensInflatorMap, binaryEncodedTokens:number[], startOffset:number, endOffset:number, deltaStartIndex:number): Modes.IToken[];
+	sliceAndInflate(map:ITokensInflatorMap, binaryEncodedTokens:number[], startOffset:number, endOffset:number, deltaStartIndex:number): IToken[];
 }
-export var LineTokensBinaryEncoding:ILineTokensBinaryEncoding = TokensBinaryEncoding;
 
 /**
  * A list of tokens on a line.
@@ -1203,7 +1309,6 @@ export interface ILineTokens {
 	getTokenCount(): number;
 	getTokenStartIndex(tokenIndex:number): number;
 	getTokenType(tokenIndex:number): string;
-	getTokenBracket(tokenIndex:number): Modes.Bracket;
 	getTokenEndIndex(tokenIndex:number, textLength:number): number;
 
 	/**
@@ -1238,10 +1343,35 @@ export interface IGuessedIndentation {
 	insertSpaces: boolean;
 }
 
+export interface ITextModelResolvedOptions {
+	tabSize: number;
+	insertSpaces: boolean;
+	defaultEOL: DefaultEndOfLine;
+}
+
+export interface ITextModelCreationOptions {
+	tabSize: number;
+	insertSpaces: boolean;
+	detectIndentation: boolean;
+	defaultEOL: DefaultEndOfLine;
+}
+
+export interface ITextModelUpdateOptions {
+	tabSize?: number;
+	insertSpaces?: boolean;
+}
+
+export interface IModelOptionsChangedEvent {
+	tabSize: boolean;
+	insertSpaces: boolean;
+}
+
 /**
  * A textual read-only model.
  */
 export interface ITextModel {
+
+	getOptions(): ITextModelResolvedOptions;
 
 	/**
 	 * Get the current version id of the model.
@@ -1274,6 +1404,8 @@ export interface ITextModel {
 
 	toRawText(): IRawText;
 
+	equals(other:IRawText): boolean;
+
 	/**
 	 * Get the text in a certain range.
 	 * @param range The range describing what text to get.
@@ -1296,14 +1428,6 @@ export interface ITextModel {
 	 * If count(B) > count(A) return true. Returns false otherwise.
 	 */
 	isDominatedByLongLines(longLineBoundary:number): boolean;
-
-	/**
-	 * Guess the text indentation.
-	 * @param defaultTabSize The tab size to use if `insertSpaces` is false.
-	 * If `insertSpaces` is true, then `tabSize` is relevant.
-	 * If `insertSpaces` is false, then `tabSize` is `defaultTabSize`.
-	 */
-	guessIndentation(defaultTabSize:number): IGuessedIndentation;
 
 	/**
 	 * Get the number of lines in the model.
@@ -1383,6 +1507,21 @@ export interface ITextModel {
 	isDisposed(): boolean;
 }
 
+export interface IRichEditBracket {
+	modeId: string;
+	open: string;
+	close: string;
+	forwardRegex: RegExp;
+	reversedRegex: RegExp;
+}
+
+export interface IFoundBracket {
+	range: IEditorRange;
+	open: string;
+	close: string;
+	isOpen: boolean;
+}
+
 /**
  * A model that is tokenized.
  */
@@ -1404,9 +1543,9 @@ export interface ITokenizedModel extends ITextModel {
 	/**
 	 * Tokenize if necessary and get the tokenization result for the line `lineNumber`, as returned by the language mode.
 	 */
-	getLineContext(lineNumber:number): Modes.ILineContext;
+	getLineContext(lineNumber:number): ILineContext;
 
-	/*package*/_getLineModeTransitions(lineNumber:number): Modes.IModeTransition[];
+	/*package*/_getLineModeTransitions(lineNumber:number): IModeTransition[];
 
 	/**
 	 * Replace the entire text buffer value contained in this model.
@@ -1417,30 +1556,30 @@ export interface ITokenizedModel extends ITextModel {
 	 * unbinds the mirror model from the previous mode to the new
 	 * one if the mode has changed.
 	 */
-	setValue(newValue:string, newMode?:Modes.IMode): void;
+	setValue(newValue:string, newMode?:IMode): void;
 
 	/**
 	 * Get the current language mode associated with the model.
 	 */
-	getMode(): Modes.IMode;
+	getMode(): IMode;
 
 	/**
 	 * Set the current language mode associated with the model.
 	 */
-	setMode(newMode:Modes.IMode): void;
-	setMode(newModePromise:TPromise<Modes.IMode>): void;
+	setMode(newMode:IMode): void;
+	setMode(newModePromise:TPromise<IMode>): void;
 	/**
 	 * A mode can be currently pending loading if a promise is used when constructing a model or calling setMode().
 	 *
 	 * If there is no currently pending loading mode, then the result promise will complete immediately.
 	 * Otherwise, the result will complete once the currently pending loading mode is loaded.
 	 */
-	whenModeIsReady(): TPromise<Modes.IMode>;
+	whenModeIsReady(): TPromise<IMode>;
 
 	/**
 	 * Returns the true (inner-most) language mode at a given position.
 	 */
-	getModeAtPosition(lineNumber:number, column:number): Modes.IMode;
+	getModeAtPosition(lineNumber:number, column:number): IMode;
 
 	/**
 	 * Get the word under or besides `position`.
@@ -1475,12 +1614,26 @@ export interface ITokenizedModel extends ITextModel {
 	tokenIterator(position: IPosition, callback: (it: ITokenIterator) =>any): any;
 
 	/**
-	 * Find the matching bracket of `tokenType` up, counting brackets.
-	 * @param tokenType The token type of the bracket we're searching for
+	 * Find the matching bracket of `request` up, counting brackets.
+	 * @param request The bracket we're searching for
 	 * @param position The position at which to start the search.
 	 * @return The range of the matching bracket, or null if the bracket match was not found.
 	 */
-	findMatchingBracketUp(tokenType:string, position:IPosition): IEditorRange;
+	findMatchingBracketUp(bracket:string, position:IPosition): IEditorRange;
+
+	/**
+	 * Find the first bracket in the model before `position`.
+	 * @param position The position at which to start the search.
+	 * @return The info for the first bracket before `position`, or null if there are no more brackets before `positions`.
+	 */
+	findPrevBracket(position:IPosition): IFoundBracket;
+
+	/**
+	 * Find the first bracket in the model after `position`.
+	 * @param position The position at which to start the search.
+	 * @return The info for the first bracket after `position`, or null if there are no more brackets after `positions`.
+	 */
+	findNextBracket(position:IPosition): IFoundBracket;
 
 	/**
 	 * Given a `position`, if the position is on top or near a bracket,
@@ -1661,6 +1814,15 @@ export interface ITextModelWithDecorations {
  * An editable text model.
  */
 export interface IEditableTextModel extends ITextModelWithMarkers {
+
+	normalizeIndentation(str:string): string;
+
+	getOneIndent(): string;
+
+	updateOptions(newOpts:ITextModelUpdateOptions): void;
+
+	detectIndentation(defaultInsertSpaces:boolean, defaultTabSize:number): void;
+
 	/**
 	 * Push a stack element onto the undo stack. This acts as an undo/redo point.
 	 * The idea is to use `pushEditOperations` to edit the model and then to
@@ -1730,25 +1892,6 @@ export interface IModel extends IEditableTextModel, ITextModelWithMarkers, IToke
 	destroy(): void;
 
 	/**
-	 * Set a property on the model. This property will be forwarded to the
-	 * mirror model associated with this model. Please make sure that the
-	 * value can be serialized. If a property by the same name exists,
-	 * it will be overwritten.
-	 */
-	setProperty(name:string, value:any): void;
-
-	/**
-	 * Returns a property previously set on the model.
-	 * If the property is not defined, returns null.
-	 */
-	getProperty(name:string): any;
-
-	/**
-	 * Returns all properties set on the model.
-	 */
-	getProperties(): {[name:string]:any;};
-
-	/**
 	 * Gets the resource associated with this editor model.
 	 */
 	getAssociatedResource(): URI;
@@ -1805,8 +1948,11 @@ export interface IModel extends IEditableTextModel, ITextModelWithMarkers, IToke
 	 * unbinds the mirror model from the previous mode to the new
 	 * one if the mode has changed.
 	 */
-	setValue(newValue:string, newMode?:Modes.IMode): void;
-	setValue(newValue:string, newModePromise:TPromise<Modes.IMode>): void;
+	setValue(newValue:string, newMode?:IMode): void;
+	setValue(newValue:string, newModePromise:TPromise<IMode>): void;
+
+	setValueFromRawText(newValue:IRawText, newMode?:IMode): void;
+	setValueFromRawText(newValue:IRawText, newModePromise:TPromise<IMode>): void;
 
 	onBeforeAttached(): void;
 
@@ -1830,7 +1976,6 @@ export interface IMirrorModel extends IEventEmitter, ITokenizedModel {
 	getAllEmbedded(): IMirrorModel[];
 
 	getAssociatedResource(): URI;
-	getProperty(key:string): any;
 
 	getOffsetFromPosition(position:IPosition): number;
 	getPositionFromOffset(offset:number): IPosition;
@@ -1849,11 +1994,11 @@ export interface IModelModeChangedEvent {
 	/**
 	 * Previous mode
 	 */
-	oldMode:Modes.IMode;
+	oldMode:IMode;
 	/**
 	 * New mode
 	 */
-	newMode:Modes.IMode;
+	newMode:IMode;
 }
 
 /**
@@ -1919,6 +2064,7 @@ export interface IRawText {
 	lines: string[];
 	BOM: string;
 	EOL: string;
+	options: ITextModelResolvedOptions;
 }
 /**
  * An event describing that a model has been reset to a new value.
@@ -1973,20 +2119,9 @@ export interface IModelContentChangedLinesInsertedEvent extends IModelContentCha
 	detail: string;
 }
 /**
- * An event describing that model properties have changed.
- */
-export interface IModelPropertiesChangedEvent {
-	/**
-	 * A map with all the properties of the model.
-	 */
-	properties: {
-		[key:string]:any;
-	};
-}
-/**
  * Decoration data associated with a model decorations changed event.
  */
-export interface IModelDecorationsChangedEvent_DecorationData {
+export interface IModelDecorationsChangedEventDecorationData {
 	id:string;
 	ownerId:number;
 	range:IRange;
@@ -2004,7 +2139,7 @@ export interface IModelDecorationsChangedEvent {
 	/**
 	 * Lists of details
 	 */
-	addedOrChangedDecorations:IModelDecorationsChangedEvent_DecorationData[];
+	addedOrChangedDecorations:IModelDecorationsChangedEventDecorationData[];
 	removedDecorations:string[];
 	oldOptions:{[decorationId:string]:IModelDecorationOptions;};
 	oldRanges:{[decorationId:string]:IRange;};
@@ -2302,6 +2437,7 @@ export interface IViewState {
 export interface ICodeEditorViewState extends IEditorViewState {
 	cursorState:ICursorState[];
 	viewState:IViewState;
+	contributionsState: {[id:string]:any};
 }
 
 /**
@@ -2451,25 +2587,51 @@ export interface IConfiguration {
 	setLineCount(lineCount:number): void;
 
 	handlerDispatcher: IHandlerDispatcher;
-
-	getIndentationOptions(): IInternalIndentationOptions;
-	getOneIndent(): string;
-	normalizeIndentation(str:string): string;
 }
 
 // --- view
 
-export interface IViewLineTokens {
-	getTokens(): ILineToken[];
-	getFauxIndentLength(): number;
-	getTextLength(): number;
-	equals(other:IViewLineTokens): boolean;
-	findIndexOfOffset(offset:number): number;
+export class ViewLineTokens {
+	_viewLineTokensTrait: void;
+
+	private _lineTokens:ViewLineToken[];
+	private _fauxIndentLength:number;
+	private _textLength:number;
+
+	constructor(lineTokens:ViewLineToken[], fauxIndentLength:number, textLength:number) {
+		this._lineTokens = lineTokens;
+		this._fauxIndentLength = fauxIndentLength|0;
+		this._textLength = textLength|0;
+	}
+
+	public getTokens(): ViewLineToken[] {
+		return this._lineTokens;
+	}
+
+	public getFauxIndentLength(): number {
+		return this._fauxIndentLength;
+	}
+
+	public getTextLength(): number {
+		return this._textLength;
+	}
+
+	public equals(other:ViewLineTokens): boolean {
+		return (
+			this._fauxIndentLength === other._fauxIndentLength
+			&& this._textLength === other._textLength
+			&& ViewLineToken.equalsArray(this._lineTokens, other._lineTokens)
+		);
+	}
+
+	public findIndexOfOffset(offset:number): number {
+		return ViewLineToken.findIndexInSegmentsArray(this._lineTokens, offset);
+	}
 }
 
-export interface IViewModelDecorationsResolver {
-	getDecorations(): IModelDecoration[];
-	getInlineDecorations(lineNumber: number): IModelDecoration[];
+export interface IDecorationsViewportData {
+	decorations: IModelDecoration[];
+	inlineDecorations: IModelDecoration[][];
 }
 
 export interface IViewEventBus {
@@ -2485,16 +2647,10 @@ export interface IWhitespaceManager {
 	addWhitespace(afterLineNumber:number, ordinal:number, height:number): number;
 
 	/**
-	 * Change the height of a whitespace.
+	 * Change the properties of a whitespace.
 	 * @param height is specified in pixels.
 	 */
-	changeWhitespace(id:number, newHeight:number): boolean;
-
-	/**
-	 * Change the `afterLineNumber` of a whitespace.
-	 * @return a boolean indicating if something has actually changed
-	 */
-	changeAfterLineNumberForWhitespace(id:number, newAfterLineNumber:number): boolean;
+	changeWhitespace(id:number, newAfterLineNumber:number, newHeight:number): boolean;
 
 	/**
 	 * Remove rendering space
@@ -2511,14 +2667,16 @@ export interface IWhitespaceManager {
 
 export interface IViewModel extends IEventEmitter, IDisposable {
 
+	getTabSize(): number;
+
 	getLineCount(): number;
 	getLineContent(lineNumber:number): string;
 	getLineMinColumn(lineNumber:number): number;
 	getLineMaxColumn(lineNumber:number): number;
 	getLineFirstNonWhitespaceColumn(lineNumber:number): number;
 	getLineLastNonWhitespaceColumn(lineNumber:number): number;
-	getLineTokens(lineNumber:number): IViewLineTokens;
-	getDecorationsResolver(startLineNumber:number, endLineNumber:number): IViewModelDecorationsResolver;
+	getLineTokens(lineNumber:number): ViewLineTokens;
+	getDecorationsViewportData(startLineNumber:number, endLineNumber:number): IDecorationsViewportData;
 	getLineRenderLineNumber(lineNumber:number): string;
 	getAllDecorations(): IModelDecoration[];
 	getEOL(): string;
@@ -2534,6 +2692,7 @@ export interface IViewModel extends IEventEmitter, IDisposable {
 	convertViewRangeToModelRange(viewRange:IRange): IEditorRange;
 	convertModelPositionToViewPosition(modelLineNumber:number, modelColumn:number): IEditorPosition;
 	convertModelSelectionToViewSelection(modelSelection:IEditorSelection): IEditorSelection;
+	modelPositionIsVisible(position:IPosition): boolean;
 }
 
 export interface IViewEventNames {
@@ -2668,40 +2827,81 @@ export interface IViewWhitespaceViewportData {
 	height:number;
 }
 
-export interface IViewLinesViewportData {
+export interface IPartialViewLinesViewportData {
 	viewportTop: number;
 	viewportHeight: number;
-
 	bigNumbersDelta: number;
+	visibleRangesDeltaTop: number;
+	startLineNumber: number;
+	endLineNumber: number;
+	relativeVerticalOffset: number[];
+}
 
-	visibleRangesDeltaTop:number;
+export class ViewLinesViewportData {
+	_viewLinesViewportDataTrait: void;
+
+	viewportTop: number;
+	viewportHeight: number;
+	bigNumbersDelta: number;
+	visibleRangesDeltaTop: number;
 	/**
 	 * The line number at which to start rendering (inclusive).
 	 */
-	startLineNumber:number;
+	startLineNumber: number;
 	/**
 	 * The line number at which to end rendering (inclusive).
 	 */
-	endLineNumber:number;
+	endLineNumber: number;
 	/**
 	 * relativeVerticalOffset[i] is the gap that must be left between line at
 	 * i - 1 + `startLineNumber` and i + `startLineNumber`.
 	 */
-	relativeVerticalOffset:number[];
+	relativeVerticalOffset: number[];
 	/**
 	 * The viewport as a range (`startLineNumber`,1) -> (`endLineNumber`,maxColumn(`endLineNumber`)).
 	 */
 	visibleRange:IEditorRange;
 
-	getInlineDecorationsForLineInViewport(lineNumber:number): IModelDecoration[];
-	getDecorationsInViewport(): IModelDecoration[];
+	private _decorations: IModelDecoration[];
+	private _inlineDecorations: IModelDecoration[][];
+
+	constructor(partialData:IPartialViewLinesViewportData, visibleRange:IEditorRange, decorationsData:IDecorationsViewportData) {
+		this.viewportTop = partialData.viewportTop|0;
+		this.viewportHeight = partialData.viewportHeight|0;
+		this.bigNumbersDelta = partialData.bigNumbersDelta|0;
+		this.visibleRangesDeltaTop = partialData.visibleRangesDeltaTop|0;
+		this.startLineNumber = partialData.startLineNumber|0;
+		this.endLineNumber = partialData.endLineNumber|0;
+		this.relativeVerticalOffset = partialData.relativeVerticalOffset;
+		this.visibleRange = visibleRange;
+		this._decorations = decorationsData.decorations;
+		this._inlineDecorations = decorationsData.inlineDecorations;
+	}
+
+	public getDecorationsInViewport(): IModelDecoration[] {
+		return this._decorations;
+	}
+
+	public getInlineDecorationsForLineInViewport(lineNumber:number): IModelDecoration[] {
+		lineNumber = lineNumber|0;
+		return this._inlineDecorations[lineNumber - this.startLineNumber];
+	}
 }
 
-export interface IViewport {
+export class Viewport {
+	_viewportTrait: void;
+
 	top: number;
 	left: number;
 	width: number;
 	height: number;
+
+	constructor(top:number, left:number, width:number, height:number) {
+		this.top = top|0;
+		this.left = left|0;
+		this.width = width|0;
+		this.height = height|0;
+	}
 }
 
 /**
@@ -2720,7 +2920,7 @@ export interface IActionDescriptor {
 	 * An array of keybindings for the action.
 	 */
 	keybindings?: number[];
-	keybindingContext: string;
+	keybindingContext?: string;
 	/**
 	 * A set of enablement conditions.
 	 */
@@ -2749,11 +2949,12 @@ export interface IActionDescriptor {
 export interface IEditorActionDescriptorData {
 	id:string;
 	label:string;
+	keywords?:string[];
 }
 
-export type IEditorActionContributionCtor = INewConstructorSignature2<IEditorActionDescriptorData, ICommonCodeEditor, IEditorContribution>;
+export type IEditorActionContributionCtor = IConstructorSignature2<IEditorActionDescriptorData, ICommonCodeEditor, IEditorContribution>;
 
-export type ICommonEditorContributionCtor = INewConstructorSignature1<ICommonCodeEditor, IEditorContribution>;
+export type ICommonEditorContributionCtor = IConstructorSignature1<ICommonCodeEditor, IEditorContribution>;
 
 /**
  * An editor contribution descriptor that will be used to construct editor contributions
@@ -2993,6 +3194,14 @@ export interface IEditorContribution {
 	 * Dispose this contribution.
 	 */
 	dispose(): void;
+	/**
+	 * Store view state.
+	 */
+	saveViewState?(): any;
+	/**
+	 * Restore view state.
+	 */
+	restoreViewState?(state: any): void;
 }
 
 export type MarkedString = string | { language: string; value: string };
@@ -3058,18 +3267,6 @@ export interface ICommonCodeEditor extends IEditor {
 	 * Returns the 'raw' editor's configuration, as it was applied over the defaults, but without any computed members.
 	 */
 	getRawConfiguration(): IEditorOptions;
-
-	/**
-	 * Computed indentation options.
-	 * If either one of the `tabSize` and `insertSpaces` options is set to 'auto', this is computed based on the current attached model.
-	 * Otherwise, they are equal to `tabSize` and `insertSpaces`.
-	 */
-	getIndentationOptions(): IInternalIndentationOptions;
-
-	/**
-	 * Normalize whitespace using the editor's whitespace specific settings
-	 */
-	normalizeIndentation(str: string): string;
 
 	/**
 	 * Get value of the current model attached to this editor.
@@ -3240,6 +3437,7 @@ export var EventType = {
 	ModelTokensChanged: 'modelTokensChanged',
 	ModelModeChanged: 'modelsModeChanged',
 	ModelModeSupportChanged: 'modelsModeSupportChanged',
+	ModelOptionsChanged: 'modelOptionsChanged',
 	ModelContentChanged: 'contentChanged',
 	ModelContentChanged2: 'contentChanged2',
 	ModelContentChangedFlush: 'flush',
@@ -3252,7 +3450,6 @@ export var EventType = {
 	EditorFocus: 'widgetFocus',
 	EditorBlur: 'widgetBlur',
 
-	ModelPropertiesChanged: 'propertiesChanged',
 	ModelDecorationsChanged: 'decorationsChanged',
 
 	CursorPositionChanged: 'positionChanged',
@@ -3289,13 +3486,25 @@ export var Handler = {
 
 	CursorLeft:					'cursorLeft',
 	CursorLeftSelect:			'cursorLeftSelect',
+
 	CursorWordLeft:				'cursorWordLeft',
+	CursorWordStartLeft:		'cursorWordStartLeft',
+	CursorWordEndLeft:			'cursorWordEndLeft',
+
 	CursorWordLeftSelect:		'cursorWordLeftSelect',
+	CursorWordStartLeftSelect:	'cursorWordStartLeftSelect',
+	CursorWordEndLeftSelect:	'cursorWordEndLeftSelect',
 
 	CursorRight:				'cursorRight',
 	CursorRightSelect:			'cursorRightSelect',
+
 	CursorWordRight:			'cursorWordRight',
+	CursorWordStartRight:		'cursorWordStartRight',
+	CursorWordEndRight:			'cursorWordEndRight',
+
 	CursorWordRightSelect:		'cursorWordRightSelect',
+	CursorWordStartRightSelect:	'cursorWordStartRightSelect',
+	CursorWordEndRightSelect:	'cursorWordEndRightSelect',
 
 	CursorUp:					'cursorUp',
 	CursorUpSelect:				'cursorUpSelect',
@@ -3320,11 +3529,19 @@ export var Handler = {
 	CursorBottom:				'cursorBottom',
 	CursorBottomSelect:			'cursorBottomSelect',
 
+	CursorColumnSelectLeft:		'cursorColumnSelectLeft',
+	CursorColumnSelectRight:	'cursorColumnSelectRight',
+	CursorColumnSelectUp:		'cursorColumnSelectUp',
+	CursorColumnSelectPageUp:	'cursorColumnSelectPageUp',
+	CursorColumnSelectDown:		'cursorColumnSelectDown',
+	CursorColumnSelectPageDown:	'cursorColumnSelectPageDown',
+
 	AddCursorDown:				'addCursorDown',
 	AddCursorUp:				'addCursorUp',
 	CursorUndo:					'cursorUndo',
 	MoveTo:						'moveTo',
 	MoveToSelect:				'moveToSelect',
+	ColumnSelect:				'columnSelect',
 	CreateCursor:				'createCursor',
 	LastCursorMoveToSelect:		'lastCursorMoveToSelect',
 
@@ -3340,12 +3557,18 @@ export var Handler = {
 
 	DeleteLeft:					'deleteLeft',
 	DeleteRight:				'deleteRight',
+
 	DeleteWordLeft:				'deleteWordLeft',
+	DeleteWordStartLeft:		'deleteWordStartLeft',
+	DeleteWordEndLeft:			'deleteWordEndLeft',
+
 	DeleteWordRight:			'deleteWordRight',
+	DeleteWordStartRight:		'deleteWordStartRight',
+	DeleteWordEndRight:			'deleteWordEndRight',
+
 	DeleteAllLeft:				'deleteAllLeft',
 	DeleteAllRight:				'deleteAllRight',
 
-	Enter: 						'enter',
 	RemoveSecondaryCursors: 	'removeSecondaryCursors',
 	CancelSelection:			'cancelSelection',
 
@@ -3382,9 +3605,38 @@ export class VisibleRange {
 	public width:number;
 
 	constructor(top:number, left:number, width:number) {
-		this.top = top;
-		this.left = left;
-		this.width = width;
+		this.top = top|0;
+		this.left = left|0;
+		this.width = width|0;
+	}
+}
+
+export enum TextEditorCursorStyle {
+	Line = 1,
+	Block = 2,
+	Underline = 3
+}
+
+export function cursorStyleFromString(cursorStyle:string): TextEditorCursorStyle {
+	if (cursorStyle === 'line') {
+		return TextEditorCursorStyle.Line;
+	} else if (cursorStyle === 'block') {
+		return TextEditorCursorStyle.Block;
+	} else if (cursorStyle === 'underline') {
+		return TextEditorCursorStyle.Underline;
+	}
+	return TextEditorCursorStyle.Line;
+}
+
+export function cursorStyleToString(cursorStyle:TextEditorCursorStyle): string {
+	if (cursorStyle === TextEditorCursorStyle.Line) {
+		return 'line';
+	} else if (cursorStyle === TextEditorCursorStyle.Block) {
+		return 'block';
+	} else if (cursorStyle === TextEditorCursorStyle.Underline) {
+		return 'underline';
+	} else {
+		throw new Error('cursorStyleToString: Unknown cursorStyle');
 	}
 }
 
@@ -3394,8 +3646,8 @@ export class HorizontalRange {
 	public width: number;
 
 	constructor(left:number, width:number) {
-		this.left = left;
-		this.width = width;
+		this.left = left|0;
+		this.width = width|0;
 	}
 }
 

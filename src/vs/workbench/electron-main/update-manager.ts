@@ -3,6 +3,7 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+'use strict';
 
 import fs = require('fs');
 import path = require('path');
@@ -12,10 +13,9 @@ import electron = require('electron');
 import platform = require('vs/base/common/platform');
 import env = require('vs/workbench/electron-main/env');
 import settings = require('vs/workbench/electron-main/settings');
-import {Win32AutoUpdaterImpl} from 'vs/workbench/electron-main/win32/auto-updater.win32';
+import {Win32AutoUpdaterImpl} from 'vs/workbench/electron-main/auto-updater.win32';
+import {LinuxAutoUpdaterImpl} from 'vs/workbench/electron-main/auto-updater.linux';
 import {manager as Lifecycle} from 'vs/workbench/electron-main/lifecycle';
-
-'use strict';
 
 export enum State {
 	Uninitialized,
@@ -64,6 +64,8 @@ export class UpdateManager extends events.EventEmitter {
 
 		if (platform.isWindows) {
 			this.raw = new Win32AutoUpdaterImpl();
+		} else if (platform.isLinux) {
+			this.raw = new LinuxAutoUpdaterImpl();
 		} else if (platform.isMacintosh) {
 			this.raw = electron.autoUpdater;
 		}
@@ -84,9 +86,21 @@ export class UpdateManager extends events.EventEmitter {
 			this.setState(State.CheckingForUpdate);
 		});
 
-		this.raw.on('update-available', () => {
-			this.emit('update-available');
-			this.setState(State.UpdateAvailable);
+		this.raw.on('update-available', (event, url: string) => {
+			this.emit('update-available', url);
+
+			let data: IUpdate = null;
+
+			if (url) {
+				data = {
+					releaseNotes: '',
+					version: '',
+					date: new Date(),
+					quitAndUpdate: () => electron.shell.openExternal(url)
+				};
+			}
+
+			this.setState(State.UpdateAvailable, data);
 		});
 
 		this.raw.on('update-not-available', () => {
@@ -111,6 +125,13 @@ export class UpdateManager extends events.EventEmitter {
 		Lifecycle.quit().done(vetod => {
 			if (vetod) {
 				return;
+			}
+
+			// for some reason updating on Mac causes the local storage not to be flushed.
+			// we workaround this issue by forcing an explicit flush of the storage data.
+			// see also https://github.com/Microsoft/vscode/issues/172
+			if (platform.isMacintosh) {
+				electron.session.defaultSession.flushStorageData();
 			}
 
 			rawQuitAndUpdate();
@@ -189,10 +210,6 @@ export class UpdateManager extends events.EventEmitter {
 
 	private static getUpdateFeedUrl(channel: string): string {
 		if (!channel) {
-			return null;
-		}
-
-		if (platform.isLinux) {
 			return null;
 		}
 

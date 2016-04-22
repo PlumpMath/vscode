@@ -7,14 +7,14 @@
 
 import 'vs/css!./dropdown';
 import {Builder, $} from 'vs/base/browser/builder';
-import {Promise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import {Gesture, EventType} from 'vs/base/browser/touch';
 import {ActionRunner, IAction} from 'vs/base/common/actions';
-import {ActionBar, ActionItem, IActionItem} from 'vs/base/browser/ui/actionbar/actionbar';
+import {ActionItem, IActionItem} from 'vs/base/browser/ui/actionbar/actionbar';
 import {EventEmitter} from 'vs/base/common/eventEmitter';
-import {IDisposable, disposeAll} from 'vs/base/common/lifecycle';
-import {ContextView, IContextViewProvider} from 'vs/base/browser/ui/contextview/contextview';
-import {Menu, IMenuOptions} from 'vs/base/browser/ui/menu/menu';
+import {IDisposable, dispose} from 'vs/base/common/lifecycle';
+import {IContextViewProvider} from 'vs/base/browser/ui/contextview/contextview';
+import {IMenuOptions} from 'vs/base/browser/ui/menu/menu';
 
 export interface ILabelRenderer {
 	(container: HTMLElement): IDisposable;
@@ -76,11 +76,11 @@ export class BaseDropdown extends ActionRunner {
 			};
 		}
 
-		this.$label.on(['click', EventType.Tap], (e: Event) => {
+		this.$label.on(['mousedown', EventType.Tap], (e: Event) => {
 			e.preventDefault();
 			e.stopPropagation();
 
-			this.toggleDropdown();
+			this.show();
 		}).appendTo(this.$el);
 
 		let cleanupFn = labelRenderer(this.$label.getHTMLElement());
@@ -94,14 +94,6 @@ export class BaseDropdown extends ActionRunner {
 
 	public set tooltip(tooltip: string) {
 		this.$label.title(tooltip);
-	}
-
-	/*protected*/ toggleDropdown(): void {
-		if (this.$el.hasClass('active')) {
-			this.hide();
-		} else {
-			this.show();
-		}
 	}
 
 	/*protected*/ show(): void {
@@ -120,7 +112,7 @@ export class BaseDropdown extends ActionRunner {
 		super.dispose();
 		this.hide();
 
-		this.toDispose = disposeAll(this.toDispose);
+		this.toDispose = dispose(this.toDispose);
 
 		if (this.$boxContainer) {
 			this.$boxContainer.destroy();
@@ -193,7 +185,7 @@ export class Dropdown extends BaseDropdown {
 
 export interface IContextMenuDelegate {
 	getAnchor(): any;
-	getActions(): Promise;
+	getActions(): TPromise<IAction[]>;
 	getActionItem?(action: IAction): IActionItem;
 	getActionsContext?(): any;
 	getMenuClassName?(): string;
@@ -219,7 +211,6 @@ export class DropdownMenu extends BaseDropdown {
 
 	/*protected*/ _contextMenuProvider: IContextMenuProvider;
 	private _menuOptions: IMenuOptions;
-	/*protected*/ currentContainer: HTMLElement;
 	/*protected*/ _actions: IAction[];
 	/*protected*/ actionProvider: IActionProvider;
 	private menuClassName: string;
@@ -228,7 +219,6 @@ export class DropdownMenu extends BaseDropdown {
 		super(container, options);
 
 		this._contextMenuProvider = options.contextMenuProvider;
-		this.currentContainer = null;
 		this.actions = options.actions || [];
 		this.actionProvider = options.actionProvider;
 		this.menuClassName = options.menuClassName || '';
@@ -267,13 +257,12 @@ export class DropdownMenu extends BaseDropdown {
 
 		this._contextMenuProvider.showContextMenu({
 			getAnchor: () => this.$el.getHTMLElement(),
-			getActions: () => Promise.as(this.actions),
+			getActions: () => TPromise.as(this.actions),
 			getActionsContext: () => this.menuOptions ? this.menuOptions.context : null,
 			getActionItem: (action) => this.menuOptions && this.menuOptions.actionItemProvider ? this.menuOptions.actionItemProvider(action) : null,
 			getMenuClassName: () => this.menuClassName,
 			onHide: () => {
 				this.$el.removeClass('active');
-				this.currentContainer = null;
 			}
 		});
 	}

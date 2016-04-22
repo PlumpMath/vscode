@@ -26,13 +26,17 @@ import async = require('vs/base/common/async');
 import severity from 'vs/base/common/severity';
 import {IOutputService} from 'vs/workbench/parts/output/common/output';
 import {IWorkbenchEditorService} from 'vs/workbench/services/editor/common/editorService';
-import {IConfigurationService, IConfigurationServiceEvent, ConfigurationServiceEventTypes} from 'vs/platform/configuration/common/configuration';
+import {IConfigurationService, ConfigurationServiceEventTypes} from 'vs/platform/configuration/common/configuration';
 import {IEventService} from 'vs/platform/event/common/event';
 import {IInstantiationService} from 'vs/platform/instantiation/common/instantiation';
-import {IMessageService} from 'vs/platform/message/common/message';
+import {IMessageService, CloseAction} from 'vs/platform/message/common/message';
 import {IWorkspaceContextService} from 'vs/platform/workspace/common/workspace';
 import {ILifecycleService} from 'vs/platform/lifecycle/common/lifecycle';
 import URI from 'vs/base/common/uri';
+import * as semver from 'semver';
+import { shell } from 'electron';
+import {IStorageService, StorageScope} from 'vs/platform/storage/common/storage';
+import Event from 'vs/base/common/event';
 
 function toReadablePath(path: string): string {
 	if (!platform.isWindows) {
@@ -111,18 +115,18 @@ class EditorInputCache
 					return winjs.Promise.wrapError(error);
 				}
 
-				return winjs.Promise.as(rightInput);
+				return winjs.TPromise.as(rightInput);
 			}
 
 			switch (status.getStatus()) {
 				case git.Status.INDEX_MODIFIED:
-					return winjs.Promise.as(new giteditorinputs.GitIndexDiffEditorInput(fileSegment, nls.localize('gitIndexChanges', "{0} - Changes on index", folderSegment), leftInput, rightInput, status));
+					return winjs.TPromise.as(new giteditorinputs.GitIndexDiffEditorInput(fileSegment, nls.localize('gitIndexChanges', "{0} - Changes on index", folderSegment), leftInput, rightInput, status));
 				case git.Status.INDEX_RENAMED:
-					return winjs.Promise.as(new giteditorinputs.GitIndexDiffEditorInput(fileSegment, nls.localize('gitIndexChangesRenamed', "{0} - Renamed - Changes on index", folderSegment), leftInput, rightInput, status));
+					return winjs.TPromise.as(new giteditorinputs.GitIndexDiffEditorInput(fileSegment, nls.localize('gitIndexChangesRenamed', "{0} - Renamed - Changes on index", folderSegment), leftInput, rightInput, status));
 				case git.Status.MODIFIED:
-					return winjs.Promise.as(new giteditorinputs.GitWorkingTreeDiffEditorInput(fileSegment, nls.localize('workingTreeChanges', "{0} - Changes on working tree", folderSegment), leftInput, rightInput, status));
+					return winjs.TPromise.as(new giteditorinputs.GitWorkingTreeDiffEditorInput(fileSegment, nls.localize('workingTreeChanges', "{0} - Changes on working tree", folderSegment), leftInput, rightInput, status));
 				default:
-					return winjs.Promise.as(new giteditorinputs.GitDiffEditorInput(fileSegment, nls.localize('gitMergeChanges', "{0} - Merge changes", folderSegment), leftInput, rightInput, status));
+					return winjs.TPromise.as(new giteditorinputs.GitDiffEditorInput(fileSegment, nls.localize('gitMergeChanges', "{0} - Merge changes", folderSegment), leftInput, rightInput, status));
 			}
 		}).then((editorInput) => {
 			return editorInput;
@@ -154,7 +158,7 @@ class EditorInputCache
 				return this.gitService.show(path, status, 'HEAD', status.getMimetype());
 
 			default:
-				return winjs.Promise.as(null);
+				return winjs.TPromise.as(null);
 		}
 	}
 
@@ -191,7 +195,7 @@ class EditorInputCache
 				return this.editorService.inputToType({ resource });
 
 			default:
-				return winjs.Promise.as(null);
+				return winjs.TPromise.as(null);
 		}
 	}
 
@@ -235,7 +239,7 @@ class EditorInputCache
 			delete this.cache[key];
 		});
 
-		this.toDispose = lifecycle.disposeAll(this.toDispose);
+		this.toDispose = lifecycle.dispose(this.toDispose);
 	}
 }
 
@@ -273,7 +277,7 @@ export class AutoFetcher implements git.IAutoFetcher, lifecycle.IDisposable
 
 		this.toDispose = [];
 		this.toDispose.push(this.configurationService.addListener2(ConfigurationServiceEventTypes.UPDATED, e => this.onConfiguration(e.config.git)));
-		configurationService.loadConfiguration('git').done(c => this.onConfiguration(c));
+		this.onConfiguration(configurationService.getConfiguration<git.IGitConfiguration>('git'));
 	}
 
 	public get state(): git.AutoFetcherState {
@@ -351,7 +355,7 @@ export class AutoFetcher implements git.IAutoFetcher, lifecycle.IDisposable
 
 		this.currentRequest.then(() => {
 			this._state = git.AutoFetcherState.Active;
-			this.currentRequest = winjs.Promise.timeout(this.timeout);
+			this.currentRequest = winjs.TPromise.timeout(this.timeout);
 			return this.currentRequest;
 		}).then(() => this.loop(), (err) => this.deactivate());
 	}
@@ -365,6 +369,8 @@ interface IGitCredentialRequest {
 	guid: string;
 	scope: git.IGitCredentialScope;
 }
+
+const IgnoreOldGitStorageKey = 'settings.workspace.git.ignoreOld';
 
 export class GitService extends ee.EventEmitter
 	implements
@@ -392,6 +398,8 @@ export class GitService extends ee.EventEmitter
 	private refreshDelayer: async.ThrottledDelayer<void>;
 	private autoFetcher: AutoFetcher;
 
+	get onOutput(): Event<string> { return this.raw.onOutput; }
+
 	constructor(
 		raw: git.IRawGitService,
 		@IInstantiationService instantiationService: IInstantiationService,
@@ -400,7 +408,8 @@ export class GitService extends ee.EventEmitter
 		@IWorkbenchEditorService editorService: IWorkbenchEditorService,
 		@IOutputService outputService: IOutputService,
 		@IWorkspaceContextService contextService: IWorkspaceContextService,
-		@ILifecycleService lifecycleService: ILifecycleService
+		@ILifecycleService lifecycleService: ILifecycleService,
+		@IStorageService storageService: IStorageService
 	) {
 		super();
 
@@ -427,6 +436,37 @@ export class GitService extends ee.EventEmitter
 		this.inputCache = this.instantiationService.createInstance(EditorInputCache, this);
 
 		this.triggerStatus(true); // trigger initial status
+
+		if (!storageService.getBoolean(IgnoreOldGitStorageKey, StorageScope.GLOBAL, false)) {
+			this.raw.serviceState().done(state => {
+				if (state !== git.RawServiceState.OK) {
+					return;
+				}
+
+				return this.raw.getVersion().then(version => {
+					version = version || '';
+					version = version.replace(/^(\d+\.\d+\.\d+).*$/, '$1');
+					version = semver.valid(version);
+
+					if (version && semver.satisfies(version, '<2.0.0')) {
+						messageService.show(severity.Warning, {
+							message: nls.localize('updateGit', "You seem to have git {0} installed. Code works best with git >=2.0.0.", version),
+							actions: [
+								CloseAction,
+								new actions.Action('neverShowAgain', nls.localize('neverShowAgain', "Don't show again"), null, true, () => {
+									storageService.store(IgnoreOldGitStorageKey, true, StorageScope.GLOBAL);
+									return null;
+								}),
+								new actions.Action('downloadLatest', nls.localize('download', "Download"), '', true, () => {
+									shell.openExternal('https://git-scm.com/');
+									return null;
+								})
+							]
+						});
+					}
+				});
+			});
+		}
 	}
 
 	private registerListeners():void {
@@ -584,10 +624,10 @@ export class GitService extends ee.EventEmitter
 		return this.raw.serviceState().then(state => {
 			if (state === git.RawServiceState.GitNotFound) {
 				this.transition(git.ServiceState.NoGit);
-				return winjs.Promise.as(null);
+				return winjs.TPromise.as(null);
 			} else if (state === git.RawServiceState.Disabled) {
 				this.transition(git.ServiceState.Disabled);
-				return winjs.Promise.as(null);
+				return winjs.TPromise.as(null);
 			} else {
 				return this._run(operationId, fn);
 			}
@@ -637,7 +677,7 @@ export class GitService extends ee.EventEmitter
 
 			if (gitErrorCode === git.GitErrorCodes.NotAtRepositoryRoot) {
 				this.transition(git.ServiceState.NotAtRepoRoot);
-				return winjs.Promise.as(this.model);
+				return winjs.TPromise.as(this.model);
 			}
 
 			this.emit(git.ServiceEvents.ERROR, e);
@@ -646,20 +686,20 @@ export class GitService extends ee.EventEmitter
 			if (gitErrorCode === git.GitErrorCodes.NoUserNameConfigured || gitErrorCode === git.GitErrorCodes.NoUserEmailConfigured) {
 				this.messageService.show(severity.Warning, nls.localize('configureUsernameEmail', "Please configure your git user name and e-mail."));
 
-				return winjs.Promise.as(null);
+				return winjs.TPromise.as(null);
 
 			} else if (gitErrorCode === git.GitErrorCodes.BadConfigFile) {
 				this.messageService.show(severity.Error, nls.localize('badConfigFile', "Git {0}", e.message));
-				return winjs.Promise.as(null);
+				return winjs.TPromise.as(null);
 
 			} else if (gitErrorCode === git.GitErrorCodes.UnmergedChanges) {
 				this.messageService.show(severity.Warning, nls.localize('unmergedChanges', "You should first resolve the unmerged changes before committing your changes."));
-				return winjs.Promise.as(null);
+				return winjs.TPromise.as(null);
 			}
 
 			var error: Error;
-			var showOutputAction = new actions.Action('show.gitOutput', nls.localize('showOutput', "Show Output"), null, true, () => this.outputService.showOutput('Git'));
-			var cancelAction = new actions.Action('close.message', nls.localize('cancel', "Cancel"), null, true, ()=>winjs.Promise.as(true));
+			var showOutputAction = new actions.Action('show.gitOutput', nls.localize('showOutput', "Show Output"), null, true, () => this.outputService.getChannel('Git').show());
+			var cancelAction = new actions.Action('close.message', nls.localize('cancel', "Cancel"), null, true, ()=>winjs.TPromise.as(true));
 
 			error = errors.create(
 				nls.localize('checkNativeConsole', "There was an issue running a git operation. Please review the output or use a console to check the state of your repository."),
@@ -713,7 +753,7 @@ export class GitService extends ee.EventEmitter
 			}
 
 			// Text
-			return winjs.Promise.as(this.instantiationService.createInstance(giteditorinputs.NativeGitIndexStringEditorInput, fileSegment, description, mimetypes.join(', '), status, path, treeish));
+			return winjs.TPromise.as(this.instantiationService.createInstance(giteditorinputs.NativeGitIndexStringEditorInput, fileSegment, description, mimetypes.join(', '), status, path, treeish));
 		});
 	}
 
@@ -721,7 +761,7 @@ export class GitService extends ee.EventEmitter
 		return this.inputCache.getInput(status).then(null, (err) => {
 			if (err.gitErrorCode = git.GitErrorCodes.CantOpenResource) {
 				this.messageService.show(severity.Warning, nls.localize('cantOpenResource', "Can't open this git resource."));
-				return winjs.Promise.as(null);
+				return winjs.TPromise.as(null);
 			}
 
 			return winjs.Promise.wrapError(err);
@@ -738,10 +778,6 @@ export class GitService extends ee.EventEmitter
 
 	public getRunningOperations(): git.IGitOperation[] {
 		return this.operations;
-	}
-
-	public onOutput(): winjs.Promise {
-		return this.raw.onOutput();
 	}
 
 	public getAutoFetcher(): git.IAutoFetcher {

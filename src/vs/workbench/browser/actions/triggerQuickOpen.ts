@@ -8,7 +8,7 @@ import nls = require('vs/nls');
 import {IWorkbenchActionRegistry, Extensions} from 'vs/workbench/common/actionRegistry';
 import {Registry} from 'vs/platform/platform';
 import {Action} from 'vs/base/common/actions';
-import {Promise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import {KeybindingsRegistry} from 'vs/platform/keybinding/common/keybindingsRegistry';
 import {IQuickOpenService} from 'vs/workbench/services/quickopen/common/quickOpenService';
 import {KbExpr, IKeybindingService, IKeybindings} from 'vs/platform/keybinding/common/keybindingService';
@@ -28,10 +28,10 @@ class GlobalQuickOpenAction extends Action {
 		this.class = 'quickopen';
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		this.quickOpenService.show(null);
 
-		return Promise.as(true);
+		return TPromise.as(true);
 	}
 }
 
@@ -50,14 +50,14 @@ class OpenPreviousEditorAction extends Action {
 		super(id, label);
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		let keys = this.keybindingService.lookupKeybindings(this.id);
 
 		this.quickOpenService.show(null, {
 			keybindings: keys
 		});
 
-		return Promise.as(true);
+		return TPromise.as(true);
 	}
 }
 
@@ -76,14 +76,14 @@ class BaseQuickOpenNavigateAction extends Action {
 		this.navigateNext = navigateNext;
 	}
 
-	public run(event?: any): Promise {
+	public run(event?: any): TPromise<any> {
 		let keys = this.keybindingService.lookupKeybindings(this.id);
 
 		this.quickOpenService.quickNavigate({
 			keybindings: keys
 		}, this.navigateNext);
 
-		return Promise.as(true);
+		return TPromise.as(true);
 	}
 }
 
@@ -157,10 +157,10 @@ function navigateKeybinding(shift: boolean): IKeybindings {
 
 // Contribute Quick Open
 let registry = <IWorkbenchActionRegistry>Registry.as(Extensions.WorkbenchActions);
-registry.registerWorkbenchAction(new SyncActionDescriptor(GlobalQuickOpenAction, GlobalQuickOpenAction.ID, GlobalQuickOpenAction.LABEL, quickOpenKb));
+registry.registerWorkbenchAction(new SyncActionDescriptor(GlobalQuickOpenAction, GlobalQuickOpenAction.ID, GlobalQuickOpenAction.LABEL, quickOpenKb), ['go', 'to', 'file']);
 
 // Contribute Quick Navigate
-registry.registerWorkbenchAction(new SyncActionDescriptor(OpenPreviousEditorAction, OpenPreviousEditorAction.ID, OpenPreviousEditorAction.LABEL, prevEditorKb));
+registry.registerWorkbenchAction(new SyncActionDescriptor(OpenPreviousEditorAction, OpenPreviousEditorAction.ID, OpenPreviousEditorAction.LABEL, prevEditorKb), ['navigate', 'history']);
 
 // Contribute Quick Navigate in Quick Open
 registry.registerWorkbenchAction(new SyncActionDescriptor(QuickOpenNavigateNextAction, QuickOpenNavigateNextAction.ID, QuickOpenNavigateNextAction.LABEL, navigateKeybinding(false), KbExpr.has('inQuickOpen')));

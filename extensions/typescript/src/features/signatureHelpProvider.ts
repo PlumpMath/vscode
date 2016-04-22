@@ -5,7 +5,7 @@
 
 'use strict';
 
-import { workspace, SignatureHelpProvider, SignatureHelp, SignatureInformation, ParameterInformation, TextDocument, Position, CancellationToken } from 'vscode';
+import { SignatureHelpProvider, SignatureHelp, SignatureInformation, ParameterInformation, TextDocument, Position, CancellationToken } from 'vscode';
 
 import * as Previewer from './previewer';
 import * as Proto from '../protocol';
@@ -38,7 +38,15 @@ export default class TypeScriptSignatureHelpProvider implements SignatureHelpPro
 			result.activeSignature = info.selectedItemIndex;
 			result.activeParameter = info.argumentIndex;
 
-			info.items.forEach(item => {
+			if (info.items[info.selectedItemIndex].isVariadic) {
+			}
+
+			info.items.forEach((item, i) => {
+
+				// keep active parameter in bounds
+				if (i === info.selectedItemIndex && item.isVariadic) {
+					result.activeParameter = Math.min(info.argumentIndex, item.parameters.length - 1);
+				}
 
 				let signature = new SignatureInformation('');
 				signature.label += Previewer.plain(item.prefixDisplayParts);

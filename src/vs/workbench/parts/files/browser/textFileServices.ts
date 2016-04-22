@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {TPromise, Promise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import URI from 'vs/base/common/uri';
 import errors = require('vs/base/common/errors');
 import {ListenerUnbind} from 'vs/base/common/eventEmitter';
@@ -53,7 +53,12 @@ export abstract class TextFileService implements ITextFileService {
 
 	protected init(): void {
 		this.registerListeners();
-		this.loadConfiguration();
+
+		const configuration = this.configurationService.getConfiguration<IFilesConfiguration>();
+		this.onConfigurationChange(configuration);
+
+		// we want to find out about this setting from telemetry
+		this.telemetryService.publicLog('autoSave', this.getAutoSaveConfiguration());
 	}
 
 	public get onAutoSaveConfigurationChange(): Event<IAutoSaveConfiguration> {
@@ -71,7 +76,7 @@ export abstract class TextFileService implements ITextFileService {
 	private registerListeners(): void {
 
 		// Lifecycle
-		this.lifecycleService.addBeforeShutdownParticipant(this);
+		this.lifecycleService.onWillShutdown(event => event.veto(this.beforeShutdown()));
 		this.lifecycleService.onShutdown(this.dispose, this);
 
 		// Configuration changes
@@ -86,15 +91,6 @@ export abstract class TextFileService implements ITextFileService {
 		if (this.configuredAutoSaveOnFocusChange && this.getDirty().length) {
 			this.saveAll().done(null, errors.onUnexpectedError); // save dirty files when we change focus in the editor area
 		}
-	}
-
-	private loadConfiguration(): void {
-		this.configurationService.loadConfiguration().done((configuration: IFilesConfiguration) => {
-			this.onConfigurationChange(configuration);
-
-			// we want to find out about this setting from telemetry
-			this.telemetryService.publicLog('autoSave', this.getAutoSaveConfiguration());
-		}, errors.onUnexpectedError);
 	}
 
 	private onConfigurationChange(configuration: IFilesConfiguration): void {
@@ -127,8 +123,8 @@ export abstract class TextFileService implements ITextFileService {
 		}
 	}
 
-	public getDirty(resource?: URI): URI[] {
-		return this.getDirtyFileModels(resource).map((m) => m.getResource());
+	public getDirty(resources?: URI[]): URI[] {
+		return this.getDirtyFileModels(resources).map((m) => m.getResource());
 	}
 
 	public isDirty(resource?: URI): boolean {
@@ -151,7 +147,7 @@ export abstract class TextFileService implements ITextFileService {
 			};
 		});
 
-		return Promise.join(dirtyFileModels.map((model) => {
+		return TPromise.join(dirtyFileModels.map((model) => {
 			return model.save().then(() => {
 				if (!model.isDirty()) {
 					mapResourceToResult[model.getResource().toString()].success = true;
@@ -187,7 +183,7 @@ export abstract class TextFileService implements ITextFileService {
 
 	public abstract saveAs(resource: URI, targetResource?: URI): TPromise<URI>;
 
-	public confirmSave(resource?: URI): ConfirmResult {
+	public confirmSave(resources?: URI[]): ConfirmResult {
 		throw new Error('Unsupported');
 	}
 
@@ -205,7 +201,7 @@ export abstract class TextFileService implements ITextFileService {
 			};
 		});
 
-		return Promise.join(fileModels.map((model) => {
+		return TPromise.join(fileModels.map((model) => {
 			return model.revert().then(() => {
 				if (!model.isDirty()) {
 					mapResourceToResult[model.getResource().toString()].success = true;
@@ -226,7 +222,7 @@ export abstract class TextFileService implements ITextFileService {
 
 				// Otherwise bubble up the error
 				else {
-					return Promise.wrapError(error);
+					return TPromise.wrapError(error);
 				}
 			});
 		})).then((r) => {
@@ -254,7 +250,7 @@ export abstract class TextFileService implements ITextFileService {
 		}
 
 		if (this.configuredAutoSaveDelay && this.configuredAutoSaveDelay > 0) {
-			return this.configuredAutoSaveDelay <= 1000 ? AutoSaveMode.AFTER_SHORT_DELAY :  AutoSaveMode.AFTER_LONG_DELAY;
+			return this.configuredAutoSaveDelay <= 1000 ? AutoSaveMode.AFTER_SHORT_DELAY : AutoSaveMode.AFTER_LONG_DELAY;
 		}
 
 		return AutoSaveMode.OFF;
@@ -264,7 +260,7 @@ export abstract class TextFileService implements ITextFileService {
 		return {
 			autoSaveDelay: this.configuredAutoSaveDelay && this.configuredAutoSaveDelay > 0 ? this.configuredAutoSaveDelay : void 0,
 			autoSaveFocusChange: this.configuredAutoSaveOnFocusChange
-		}
+		};
 	}
 
 	public dispose(): void {

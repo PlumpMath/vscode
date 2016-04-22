@@ -3,13 +3,14 @@
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
 
+import nls = require('vs/nls');
 import lifecycle = require('vs/base/common/lifecycle');
 import errors = require('vs/base/common/errors');
-import { Promise } from 'vs/base/common/winjs.base';
+import { TPromise } from 'vs/base/common/winjs.base';
 import dom = require('vs/base/browser/dom');
 import { IAction } from 'vs/base/common/actions';
 import { BaseActionItem } from 'vs/base/browser/ui/actionbar/actionbar';
-import { IDebugService, ServiceEvents, State } from 'vs/workbench/parts/debug/common/debug';
+import { IDebugService, State } from 'vs/workbench/parts/debug/common/debug';
 import { IConfigurationService, ConfigurationServiceEventTypes } from 'vs/platform/configuration/common/configuration';
 
 export class SelectConfigActionItem extends BaseActionItem {
@@ -35,8 +36,8 @@ export class SelectConfigActionItem extends BaseActionItem {
 		this.toDispose.push(dom.addStandardDisposableListener(this.select, 'change', (e) => {
 			this.actionRunner.run(this._action, e.target.value).done(null, errors.onUnexpectedError);
 		}));
-		this.toDispose.push(this.debugService.addListener2(ServiceEvents.STATE_CHANGED, () => {
-			this.select.disabled = this.debugService.getState() !== State.Inactive;
+		this.toDispose.push(this.debugService.onDidChangeState(state => {
+			this.select.disabled = state !== State.Inactive;
 		}));
 		this.toDispose.push(configurationService.addListener2(ConfigurationServiceEventTypes.UPDATED, e  => {
 			this.setOptions().done(null, errors.onUnexpectedError);
@@ -61,24 +62,24 @@ export class SelectConfigActionItem extends BaseActionItem {
 		}
 	}
 
-	private setOptions(): Promise {
+	private setOptions(): TPromise<any> {
 		let previousSelectedIndex = this.select.selectedIndex;
 		this.select.options.length = 0;
 
-		return this.debugService.loadLaunchConfig().then(config => {
+		return this.debugService.getConfigurationManager().loadLaunchConfig().then(config => {
 			if (!config || !config.configurations) {
-				this.select.options.add(this.createOption('<none>'));
+				this.select.add(this.createOption(`<${ nls.localize('none', "none") }>`));
 				this.select.disabled = true;
-				return;
+				return this.actionRunner.run(this._action, null);
 			}
 
 			const configurations = config.configurations;
 			this.select.disabled = configurations.length < 1;
 
 			let found = false;
-			const configurationName = this.debugService.getConfigurationName();
+			const configurationName = this.debugService.getConfigurationManager().configurationName;
 			for (let i = 0; i < configurations.length; i++) {
-				this.select.options.add(this.createOption(configurations[i].name));
+				this.select.add(this.createOption(configurations[i].name));
 				if (configurationName === configurations[i].name) {
 					this.select.selectedIndex = i;
 					found = true;
@@ -105,7 +106,7 @@ export class SelectConfigActionItem extends BaseActionItem {
 
 	public dispose(): void {
 		this.debugService = null;
-		this.toDispose = lifecycle.disposeAll(this.toDispose);
+		this.toDispose = lifecycle.dispose(this.toDispose);
 
 		super.dispose();
 	}

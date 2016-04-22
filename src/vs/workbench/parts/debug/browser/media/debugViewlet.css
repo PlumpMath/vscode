@@ -9,12 +9,48 @@
 	height: 100%;
 }
 
-.debug-viewlet .monaco-tree .monaco-tree-row > .content {
-	line-height: 22px;
+/* Actionbar actions */
+
+.monaco-workbench .debug-action.configure {
+	background: url('configure.svg') center center no-repeat;
 }
 
-.monaco-workbench .debug-select {
-	max-width: 115px;
+.monaco-workbench .debug-action.toggle-repl {
+	background: url('repl.svg') center center no-repeat;
+}
+
+.monaco-workbench .debug-action.notification:before {
+	content: '';
+	width: 6px;
+	height: 6px;
+	background-color: #CC6633;
+	position: absolute;
+	top: 11px;
+	right: 5px;
+	border-radius: 10px;
+	border: 1px solid white;
+}
+
+.vs-dark .monaco-workbench .debug-action.configure {
+	background: url('configure-inverse.svg') center center no-repeat;
+}
+
+.vs-dark .monaco-workbench .debug-action.toggle-repl {
+	background: url('repl-inverse.svg') center center no-repeat;
+}
+
+.hc-black .monaco-workbench .debug-action.configure {
+	background: url('configure-inverse.svg') center center no-repeat;
+}
+
+.hc-black .monaco-workbench .debug-action.toggle-repl {
+	background: url('repl-inverse.svg') center center no-repeat;
+}
+
+/* Debug viewlet trees */
+
+.debug-viewlet .monaco-tree .monaco-tree-row > .content {
+	line-height: 22px;
 }
 
 .monaco-workbench .monaco-action-bar .action-item.select-container {
@@ -37,13 +73,10 @@
 	margin-right: 12px;
 }
 
-.debug-viewlet .monaco-tree .monaco-tree-row .content .monaco-action-bar .action-item {
-	vertical-align: middle;
-}
-
 .debug-viewlet .monaco-tree .monaco-tree-row .content .monaco-action-bar .action-label {
 	width: 16px;
 	height: 16px;
+	vertical-align: text-bottom;
 }
 
 .debug-viewlet .monaco-tree .monaco-tree-row:hover .content .monaco-action-bar,
@@ -55,7 +88,7 @@
 	opacity: 0.35;
 }
 
-.vs-dark.monaco-workbench .debug-select {
+.vs-dark .monaco-workbench .debug-select {
 	background-color: #3C3C3C;
 	border-color: #3C3C3C;
 	color: rgb(204, 204, 204);
@@ -63,30 +96,39 @@
 
 /* Call stack */
 
-.debug-viewlet .debug-message-box {
-	border: 1px solid #F2CB1D;
-	border-style: solid none;
-	background: #F6F5D2;
-	padding: 0.4em 1em .3em 1.9em;
-	font-size: 8pt;
-	line-height: 18px;
-
-	-webkit-user-select: text;
+.debug-viewlet .debug-call-stack-title {
+	display: flex;
+	width: 100%;
 }
 
-.debug-viewlet .debug-message-box.exception {
-	border-color: #E51400;
-	background: #f2dede;
+.debug-viewlet .debug-call-stack-title > .pause-message {
+	flex: 1;
+	text-align: right;
+	text-overflow: ellipsis;
+	overflow: hidden;
+	white-space: nowrap;
+	padding-left: 5px;
 }
 
-.vs-dark .debug-viewlet .debug-message-box {
-	border-color: #B89500;
-	background: #352A05;
+.debug-viewlet .debug-call-stack-title > .pause-message > .label {
+	border-radius: 3px;
+	padding: 1px 2px;
+	font-size: 9px;
 }
 
-.vs-dark .debug-viewlet .debug-message-box.exception {
-	background-color: #5A1D1D;
-	border-color: #BE1100;
+.debug-viewlet .debug-call-stack-title > .pause-message > .label.exception {
+	background-color: #A31515;
+	color: rgb(255, 255, 255);
+}
+
+.vs-dark .debug-viewlet .debug-call-stack-title > .pause-message > .label.exception {
+	background-color: #6C2022;
+	color: inherit;
+}
+
+.hc-black .debug-viewlet .debug-call-stack-title > .pause-message > .label.exception {
+	background-color: #6C2022;
+	color: inherit;
 }
 
 .debug-viewlet .debug-call-stack .stack-frame {
@@ -110,6 +152,11 @@
 
 .debug-viewlet .debug-call-stack .stack-frame > .file:not(:first-child) {
 	margin-left: 0.8em;
+}
+
+.debug-viewlet .debug-call-stack .load-more {
+	font-style: italic;
+	text-align: center;
 }
 
 /* Variables & Expression view */
@@ -199,12 +246,12 @@
 	background: url('remove.svg') center center no-repeat;
 }
 
-.debug-viewlet .debug-action.breakpoints-activate {
-	background: url('breakpoints-activate.svg') center center no-repeat;
+.debug-viewlet .debug-action.remove-all {
+	background: url('remove-all.svg') center center no-repeat;
 }
 
-.debug-viewlet .debug-action.refresh {
-	background: url('refresh.svg') center center no-repeat;
+.debug-viewlet .debug-action.breakpoints-activate {
+	background: url('breakpoints-activate.svg') center center no-repeat;
 }
 
 .debug-viewlet .focused .monaco-tree-row.selected:not(.highlighted) > .content.actions .debug-action.remove {
@@ -215,16 +262,16 @@
 	background: url('remove-inverse.svg') center center no-repeat;
 }
 
+.vs-dark .debug-viewlet .debug-action.remove-all {
+	background: url('remove-all-inverse.svg') center center no-repeat;
+}
+
 .vs-dark .debug-viewlet .focused .monaco-tree-row.selected:not(.highlighted) > .content.actions .debug-action.remove {
 	background: url("remove-focus.svg") center center no-repeat;
 }
 
 .vs-dark .debug-viewlet .debug-action.breakpoints-activate {
 	background: url('breakpoints-activate-inverse.svg') center center no-repeat;
-}
-
-.vs-dark .debug-viewlet .debug-action.refresh {
-	background: url('refresh-inverse.svg') center center no-repeat;
 }
 
 /* No workspace view */
@@ -239,21 +286,10 @@
 
 /* High Contrast Theming */
 
-.hc-black.monaco-workbench .debug-select {
+.hc-black .monaco-workbench .debug-select {
 	background-color: #3C3C3C;
 	border-color: #3C3C3C;
 	color: rgb(204, 204, 204);
-}
-
-.hc-black.monaco-workbench .debug-message-box {
-	border: 1px solid #B89500;
-	border-style: solid none;
-	background: #352A05;
-}
-
-.hc-black .debug-viewlet .debug-message-box.exception {
-	background-color: #5A1D1D;
-	border-color: #BE1100;
 }
 
 .hc-black .debug-viewlet .debug-action.remove {
@@ -266,8 +302,4 @@
 
 .hc-black .debug-viewlet .debug-action.breakpoints-activate {
 	background: url('breakpoints-activate-inverse.svg') center center no-repeat;
-}
-
-.hc-black .debug-viewlet .debug-action.refresh {
-	background: url('refresh-inverse.svg') center center no-repeat;
 }

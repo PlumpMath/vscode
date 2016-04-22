@@ -2,8 +2,10 @@
  *  Copyright (c) Microsoft Corporation. All rights reserved.
  *  Licensed under the MIT License. See License.txt in the project root for license information.
  *--------------------------------------------------------------------------------------------*/
+
 'use strict';
 
+import nls = require('vs/nls');
 import {TPromise} from 'vs/base/common/winjs.base';
 import types = require('vs/base/common/types');
 import URI from 'vs/base/common/uri';
@@ -18,7 +20,6 @@ import {compareAnything, compareByPrefix} from 'vs/base/common/comparers';
 import {ActionBar, IActionItem} from 'vs/base/browser/ui/actionbar/actionbar';
 import {LegacyRenderer, ILegacyTemplateData} from 'vs/base/parts/tree/browser/treeDefaults';
 import {HighlightedLabel} from 'vs/base/browser/ui/highlightedlabel/highlightedLabel';
-import {OcticonLabel} from 'vs/base/browser/ui/octiconLabel/octiconLabel';
 import DOM = require('vs/base/browser/dom');
 import scorer = require('vs/base/common/scorer');
 
@@ -67,6 +68,13 @@ export class QuickOpenEntry {
 	 */
 	public getLabel(): string {
 		return null;
+	}
+
+	/**
+	 * The label of the entry to use when a screen reader wants to read about the entry
+	 */
+	public getAriaLabel(): string {
+		return this.getLabel();
 	}
 
 	/**
@@ -366,6 +374,10 @@ export class QuickOpenEntryGroup extends QuickOpenEntry {
 		return this.entry ? this.entry.getLabel() : super.getLabel();
 	}
 
+	public getAriaLabel(): string {
+		return this.entry ? this.entry.getAriaLabel() : super.getAriaLabel();
+	}
+
 	public getDetail(): string {
 		return this.entry ? this.entry.getDetail() : super.getDetail();
 	}
@@ -632,12 +644,27 @@ class Renderer implements IRenderer<QuickOpenEntry> {
 
 			// Description
 			data.description.set(entry.getDescription(), descriptionHighlights || []);
+			data.description.element.title = entry.getDescription();
 		}
 	}
 
 	public disposeTemplate(templateId: string, templateData: any): void {
 		if (templateId === templateEntryItem) {
 			this.entryItemRenderer.disposeTemplate(null, templateId, templateData);
+		} else {
+			const data = templateData as IQuickOpenEntryGroupTemplateData;
+			data.actionBar.dispose();
+			data.actionBar = null;
+			data.container = null;
+			data.description.dispose();
+			data.description = null;
+			data.detail.dispose();
+			data.detail = null;
+			data.group = null;
+			data.icon = null;
+			data.label.dispose();
+			data.label = null;
+			data.prefix = null;
 		}
 	}
 }
@@ -648,7 +675,6 @@ export class QuickOpenModel implements
 	IFilter<QuickOpenEntry>,
 	IRunner<QuickOpenEntry>
 {
-
 	private _entries: QuickOpenEntry[];
 	private _dataSource: IDataSource<QuickOpenEntry>;
 	private _renderer: IRenderer<QuickOpenEntry>;
@@ -716,7 +742,12 @@ export class QuickOpenModel implements
 	}
 
 	getAriaLabel(entry: QuickOpenEntry): string {
-		return entry.getLabel();
+		const ariaLabel = entry.getAriaLabel();
+		if (ariaLabel) {
+			return nls.localize('quickOpenAriaLabelEntry', "{0}, picker", entry.getAriaLabel());
+		}
+
+		return nls.localize('quickOpenAriaLabel', "picker");
 	}
 
 	isVisible<T>(entry: QuickOpenEntry): boolean {

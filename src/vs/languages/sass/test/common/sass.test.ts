@@ -4,24 +4,46 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import 'vs/languages/sass/common/sass.contribution';
 import SASS = require('vs/languages/sass/common/sass');
 import modesUtil = require('vs/editor/test/common/modesUtil');
 import Modes = require('vs/editor/common/modes');
 import * as sassTokenTypes from 'vs/languages/sass/common/sassTokenTypes';
+import {NULL_THREAD_SERVICE} from 'vs/platform/test/common/nullThreadService';
+import {MockModeService} from 'vs/editor/test/common/mocks/mockModeService';
+import {IThreadService} from 'vs/platform/thread/common/thread';
+import {IModeService} from 'vs/editor/common/services/modeService';
+import {ServiceCollection} from 'vs/platform/instantiation/common/serviceCollection';
+import {InstantiationService} from 'vs/platform/instantiation/common/instantiationService';
 
 suite('Sass Colorizer', () => {
 
 	var tokenizationSupport: Modes.ITokenizationSupport;
 	var assertOnEnter: modesUtil.IOnEnterAsserter;
 
-	setup((done) => {
-		modesUtil.load('sass').then(mode => {
-			tokenizationSupport = mode.tokenizationSupport;
-			assertOnEnter = modesUtil.createOnEnterAsserter(mode.getId(), mode.onEnterSupport);
-			done();
-		});
-	});
+	(function() {
+
+		let threadService = NULL_THREAD_SERVICE;
+		let modeService = new MockModeService();
+		let services = new ServiceCollection();
+		services.set(IThreadService, threadService);
+		services.set(IModeService, modeService);
+		let inst = new InstantiationService(services);
+		threadService.setInstantiationService(inst);
+
+
+		let mode = new SASS.SASSMode(
+			{ id: 'sass' },
+			inst,
+			threadService,
+			modeService,
+			null,
+			null
+		);
+
+		tokenizationSupport = mode.tokenizationSupport;
+		assertOnEnter = modesUtil.createOnEnterAsserter(mode.getId(), mode.richEditSupport);
+
+	})();
 
 	test('', () => {
 		modesUtil.executeTests(tokenizationSupport, [
@@ -1185,7 +1207,6 @@ suite('Sass Colorizer', () => {
 				{ startIndex: 103, type: '' },
 				{ startIndex: 104, type: 'constant.numeric.sass' },
 				{ startIndex: 105, type: 'punctuation.parenthesis.sass' },
-				{ startIndex: 106, type: 'punctuation.parenthesis.sass' },
 				{ startIndex: 107, type: '' },
 				{ startIndex: 108, type: 'punctuation.curly.sass' },
 				{ startIndex: 109, type: '' },
@@ -1817,7 +1838,6 @@ suite('Sass Colorizer', () => {
 				{ startIndex: 2, type: sassTokenTypes.TOKEN_PROPERTY + '.sass' },
 				{ startIndex: 11, type: '' },
 				{ startIndex: 12, type: 'string.punctuation.sass' },
-				{ startIndex: 13, type: 'string.punctuation.sass' },
 				{ startIndex: 14, type: 'punctuation.sass' }
 			]}]
 		]);

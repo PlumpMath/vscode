@@ -4,7 +4,7 @@
  *--------------------------------------------------------------------------------------------*/
 'use strict';
 
-import {Promise} from 'vs/base/common/winjs.base';
+import {TPromise} from 'vs/base/common/winjs.base';
 import nls = require('vs/nls');
 import {Registry} from 'vs/platform/platform';
 import {Action} from 'vs/base/common/actions';
@@ -23,13 +23,13 @@ export class ToggleSidebarPositionAction extends Action {
 		this.enabled = !!this.partService;
 	}
 
-	public run(): Promise {
+	public run(): TPromise<any> {
 		let position = this.partService.getSideBarPosition();
 		this.partService.setSideBarPosition(position === Position.LEFT ? Position.RIGHT : Position.LEFT);
 
-		return Promise.as(null);
+		return TPromise.as(null);
 	}
 }
 
 let registry = <IWorkbenchActionRegistry>Registry.as(Extensions.WorkbenchActions);
-registry.registerWorkbenchAction(new SyncActionDescriptor(ToggleSidebarPositionAction, ID, LABEL), nls.localize('view', "View"));
+registry.registerWorkbenchAction(new SyncActionDescriptor(ToggleSidebarPositionAction, ID, LABEL), nls.localize('view', "View"), ['side', 'bar', 'position']);
